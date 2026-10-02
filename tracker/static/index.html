@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Live</title>
+<style>
+  :root {
+    --paper: #E9EDE2;
+    --water: #C6DBE3;
+    --ink: #1C2A44;
+    --ink-2: #4F607A;
+    --grid: #93ACBE;
+    --border: #A3AFA6;
+    --airway: #A3227B;
+    --restricted: #C8302B;
+    --back: #1E7F55;
+    --strip: #F3E9C4;
+    --strip-edge: #D8C88A;
+    --panel: #F6F7F2;
+    --rule: #CBD2C8;
+
+    --f-display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    --f-num: "DIN Alternate", "Avenir Next", "Helvetica Neue", sans-serif;
+    --f-text: "Avenir Next", Avenir, -apple-system, "Helvetica Neue", sans-serif;
+    --f-chart: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--panel);
+    color: var(--ink);
+    font: 15px/1.45 var(--f-text);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 392px;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------- chart ---------- */
+  .chart {
+    position: relative;
+    margin: 14px 0 14px 14px;
+    border: 1.5px solid var(--ink);
+    outline: 1px solid var(--ink);
+    outline-offset: 3px;
+    background: var(--water);
+    overflow: hidden;
+    min-height: 0;
+  }
+  #map { display: block; width: 100%; height: 100%; cursor: grab; }
+  #map:active { cursor: grabbing; }
+
+  .land { fill: var(--paper); }
+  .borders { fill: none; stroke: var(--border); stroke-width: 0.8; }
+  .graticule { fill: none; stroke: var(--grid); stroke-width: 0.5; stroke-opacity: 0.7; }
+  .zone-fill { fill: url(#hatch); }
+  .zone-edge { fill: none; stroke: var(--restricted); stroke-width: 1.6; }
+  .planned { fill: none; stroke: var(--airway); stroke-width: 1.2; stroke-dasharray: 2 5; stroke-opacity: 0.55; }
+  .ahead { fill: none; stroke: var(--airway); stroke-width: 2; stroke-dasharray: 9 6; }
+  .before { fill: none; stroke: var(--airway); stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+  .flown { fill: none; stroke: var(--airway); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+  .flown.offline { stroke: var(--restricted); }
+  path, line { vector-effect: non-scaling-stroke; }
+
+  .city circle { fill: var(--ink-2); }
+  .city text, .zone-label, .airport text, .gate text {
+    font-family: var(--f-chart);
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+  .city text { font-size: 12px; fill: var(--ink-2); }
+  .zone-label { font-size: 15px; font-style: italic; fill: var(--restricted); stroke: none; letter-spacing: 0.02em; }
+  .airport circle { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+  .airport text { font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .gate circle { stroke-width: 2; fill: var(--paper); }
+  .gate text { font-size: 12.5px; font-weight: 600; }
+  .gate.enter circle { stroke: var(--restricted); }
+  .gate.enter text { fill: var(--restricted); }
+  .gate.exit circle { stroke: var(--back); }
+  .gate.exit text { fill: var(--back); }
+
+  .datablock text { font-family: var(--f-num); font-size: 13px; fill: var(--ink); paint-order: stroke; stroke: rgba(233,237,226,0.85); stroke-width: 3px; }
+  .datablock .cs { font-size: 14px; font-weight: 700; }
+  .datablock line { stroke: var(--ink); stroke-width: 1; }
+  .fix { fill: var(--airway); stroke: #fff; stroke-width: 1.5; }
+
+  .legend {
+    position: absolute; left: 14px; bottom: 14px;
+    background: rgba(246, 247, 242, 0.94);
+    border: 1px solid var(--ink);
+    padding: 10px 12px 9px;
+    font: 12.5px/1.35 var(--f-chart);
+    color: var(--ink);
+    max-width: 290px;
+  }
+  .legend h2 { font: 20px/1 var(--f-display); margin: 0 0 6px; letter-spacing: 0.01em; }
+  .legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+  .legend li { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 8px; }
+  .legend svg { display: block; }
+
+  .map-tools { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; }
+  .map-tools button {
+    font: 600 13px var(--f-text); color: var(--ink);
+    background: var(--panel); border: 1px solid var(--ink); padding: 6px 10px; cursor: pointer;
+  }
+  .map-tools button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+  button:focus-visible { outline: 2px solid var(--airway); outline-offset: 2px; }
+
+  /* ---------- strip board (side panel) ---------- */
+  .board { overflow-y: auto; padding: 14px 14px 24px; display: grid; gap: 12px; align-content: start; }
+
+  .strip {
+    background: var(--strip);
+    border: 1px solid var(--strip-edge);
+    border-left: 8px solid var(--airway);
+  }
+  .strip-id { display: grid; grid-template-columns: 1fr auto; align-items: end; padding: 10px 12px 6px; }
+  .callsign { font: 46px/0.9 var(--f-display); letter-spacing: 0.01em; margin: 0; }
+  .route { font: 15px/1.2 var(--f-text); color: var(--ink-2); margin-top: 4px; }
+  .clocks { text-align: right; font: 13px/1.35 var(--f-num); color: var(--ink-2); }
+  .clocks b { color: var(--ink); font-weight: 700; }
+  .fields { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--strip-edge); }
+  .fields div { padding: 5px 8px 6px; border-right: 1px solid var(--strip-edge); }
+  .fields div:last-child { border-right: 0; }
+  .fields small { display: block; font: 11.5px/1.2 var(--f-text); color: var(--ink-2); }
+  .fields span { font: 17px/1.2 var(--f-num); }
+
+  /* The one loud element: the status strip */
+  .status {
+    padding: 14px 14px 13px;
+    border-left: 8px solid var(--airway);
+    background: #fff;
+    border-top: 1px solid var(--rule); border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    transition: background-color 600ms ease, color 600ms ease, border-color 600ms ease;
+  }
+  .status h2 { font: 52px/0.92 var(--f-display); margin: 0 0 8px; letter-spacing: 0.005em; }
+  .status p { margin: 0; font-size: 15px; max-width: 34ch; }
+  .status .count { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid currentColor; border-top-color: color-mix(in srgb, currentColor 25%, transparent); }
+  .status .count strong { font: 40px/1 var(--f-num); letter-spacing: -0.01em; }
+  .status .count span { font-size: 14px; }
+  .status.over { background: var(--restricted); color: #fff; border-color: var(--restricted); border-left-color: #7d1512; }
+  .status.back { background: var(--back); color: #fff; border-color: var(--back); border-left-color: #0f4f33; }
+  .status.waiting { background: #fbe9e7; border-left-color: var(--restricted); }
+
+  .section { background: #fff; border: 1px solid var(--rule); }
+  .section h3 { font: 600 13px/1 var(--f-text); color: var(--ink-2); margin: 0; padding: 9px 12px 7px; border-bottom: 1px solid var(--rule); }
+
+  .instruments { display: grid; grid-template-columns: 1fr 1fr; }
+  .instr { padding: 9px 12px 10px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .instr:nth-child(2n) { border-right: 0; }
+  .instr:nth-last-child(-n+2) { border-bottom: 0; }
+  .instr small { display: block; font-size: 12.5px; color: var(--ink-2); }
+  .instr .v { font: 30px/1.05 var(--f-num); }
+  .instr .u { font: 14px var(--f-num); color: var(--ink-2); margin-left: 3px; }
+  .instr .sub { font: 13px var(--f-num); color: var(--ink-2); }
+  .hdg { display: flex; align-items: center; gap: 10px; }
+
+  .links { padding: 6px 12px 10px; display: grid; gap: 8px; }
+  .link-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: end; }
+  .link-row .name { font-size: 14px; }
+  .link-row .name small { display: block; font-size: 12px; color: var(--ink-2); }
+  .link-row .rtt { font: 22px/1 var(--f-num); text-align: right; }
+  .link-row .rtt.down { color: var(--restricted); }
+  .link-row svg { grid-column: 1 / -1; width: 100%; height: 28px; display: block; }
+  .spark { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+  .spark-down { stroke: var(--restricted); stroke-width: 2; }
+
+  .progress { padding: 12px 12px 10px; }
+  .progress svg { width: 100%; height: 54px; display: block; overflow: visible; }
+  .progress text { font: 12.5px var(--f-num); fill: var(--ink-2); }
+  .progress .ap { font-weight: 700; fill: var(--ink); }
+
+  .photos figure { margin: 0; }
+  .photos img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; display: block; background: var(--water); }
+  .photos figcaption { padding: 7px 12px 9px; font-size: 12.5px; color: var(--ink-2); display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .photos figcaption a { color: var(--ink-2); }
+  .photos .nav { display: flex; gap: 4px; }
+  .photos .nav button { width: 28px; height: 26px; border: 1px solid var(--rule); background: var(--panel); cursor: pointer; font: 15px/1 var(--f-text); color: var(--ink); }
+
+  .log { list-style: none; margin: 0; padding: 4px 0; }
+  .log li { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 5px 12px; font-size: 14px; }
+  .log time { font: 13.5px var(--f-num); color: var(--ink-2); padding-top: 1px; }
+  .log li.expected { color: var(--ink-2); font-style: italic; }
+  .log li.bad b { color: var(--restricted); }
+  .log li.good b { color: var(--back); }
+
+  .notify { font: 600 14px var(--f-text); color: var(--ink); background: var(--panel); border: 1px solid var(--ink); padding: 9px 12px; cursor: pointer; text-align: left; }
+  .notify[disabled] { opacity: 0.6; cursor: default; }
+  .source { font-size: 12.5px; color: var(--ink-2); margin: 0; padding: 0 2px; }
+  .source.err { color: var(--restricted); font-weight: 600; }
+
+  /* ---------- the "so back" moment ---------- */
+  .celebrate {
+    position: fixed; inset: 0; z-index: 10;
+    display: grid; place-items: center;
+    background: color-mix(in srgb, var(--back) 92%, transparent);
+    color: #fff; text-align: center; cursor: pointer;
+    animation: fade-in 400ms ease both;
+  }
+  .celebrate[hidden] { display: none; }
+  .celebrate h2 { font: clamp(72px, 13vw, 190px)/0.85 var(--f-display); margin: 0; letter-spacing: 0.005em; }
+  .celebrate p { font-size: 19px; margin: 18px 0 0; }
+  .celebrate img { position: absolute; top: 16%; left: calc(50% - min(280px, 30vw)); width: min(560px, 60vw); animation: flyby 4.5s cubic-bezier(.3,.1,.3,1) both; filter: drop-shadow(0 18px 18px rgba(0,0,0,.25)); }
+  @keyframes flyby { from { transform: translateX(80vw) rotate(-4deg); } to { transform: translateX(-80vw) rotate(-1deg); } }
+  @keyframes fade-in { from { opacity: 0; } }
+
+  /* Phi tints headings, links and buttons per Space with :where(...) !important.
+     Class selectors outrank :where(), so the chart keeps its own ink. */
+  .callsign, .status h2, .legend h2, .celebrate h2 { color: inherit !important; }
+  .section h3 { color: var(--ink-2) !important; }
+  .photos figcaption a { color: var(--ink-2) !important; text-decoration-color: currentColor !important; }
+  .map-tools button, .notify, .photos .nav button { border-color: var(--ink) !important; }
+  .photos .nav button { border-color: var(--rule) !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .celebrate, .celebrate img { animation: none; }
+    .celebrate img { display: none; }
+    .status { transition: none; }
+  }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 62vh auto; height: auto; overflow: auto; }
+    .chart { margin: 12px 12px 0; }
+    .legend { display: none; }
+    .board { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+
+<main class="chart" aria-label="Live route chart">
+  <svg id="map" role="img" aria-label="Route map with the Russian satellite blackout zone">
+    <defs>
+      <pattern id="hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="9" height="9" fill="#C8302B" fill-opacity="0.07"/>
+        <line x1="0" y1="0" x2="0" y2="9" stroke="#C8302B" stroke-width="2.2" stroke-opacity="0.38"/>
+      </pattern>
+    </defs>
+    <g id="world"></g>
+    <g id="overlay"></g>
+  </svg>
+
+  <div class="map-tools">
+    <button id="btn-route" aria-pressed="true">Whole route</button>
+    <button id="btn-follow" aria-pressed="false">Follow aircraft</button>
+  </div>
+
+  <aside class="legend">
+    <h2 id="legend-title">En-route chart</h2>
+    <ul>
+      <li><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="#A3227B" stroke-width="3.2"/></svg>Flown, internet up</li>
+      <li><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="#C8302B" stroke-width="3.2"/></svg>Flown, internet down</li>
+      <li><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="#A3227B" stroke-width="2" stroke-dasharray="9 6"/></svg>Ahead, great-circle estimate</li>
+      <li><svg width="34" height="14"><rect x="0" y="0" width="34" height="14" fill="url(#hatch)" stroke="#C8302B" stroke-width="1.6"/></svg>Russian airspace, satellite blackout expected</li>
+    </ul>
+  </aside>
+</main>
+
+<section class="board" aria-label="Flight status">
+  <div class="strip">
+    <div class="strip-id">
+      <div>
+        <h1 class="callsign" id="callsign">----</h1>
+        <div class="route" id="route-name">Waiting for the aircraft</div>
+      </div>
+      <div class="clocks" id="clocks"></div>
+    </div>
+    <div class="fields">
+      <div><small>Departed</small><span id="f-dep">---</span></div>
+      <div><small>Arrives</small><span id="f-arr">---</span></div>
+      <div><small>Aircraft</small><span id="f-tail">---</span></div>
+      <div><small>Type</small><span id="f-type">---</span></div>
+    </div>
+  </div>
+
+  <div class="status" id="status" aria-live="polite">
+    <h2 id="st-title">Finding the aircraft</h2>
+    <p id="st-sub">Connecting to the plane's flight data.</p>
+    <div class="count" id="st-count" hidden><strong id="st-num"></strong><span id="st-unit"></span></div>
+  </div>
+
+  <div class="section">
+    <h3>Aircraft</h3>
+    <div class="instruments">
+      <div class="instr"><small>Altitude</small><span class="v" id="i-alt">--</span><span class="u">ft</span><div class="sub" id="i-fl"></div></div>
+      <div class="instr"><small>Ground speed</small><span class="v" id="i-gs">--</span><span class="u">kt</span><div class="sub" id="i-kmh"></div></div>
+      <div class="instr"><small>Heading</small>
+        <div class="hdg"><span><span class="v" id="i-hdg">--</span><span class="u">°</span></span>
+          <svg width="40" height="40" viewBox="-20 -20 40 40" aria-hidden="true">
+            <circle r="18" fill="none" stroke="#CBD2C8"/>
+            <text y="-9" text-anchor="middle" font-size="8" font-family="Avenir Next" fill="#4F607A">N</text>
+            <g id="needle"><path d="M0,-15 L4,4 L0,1 L-4,4 Z" fill="#A3227B"/></g>
+          </svg>
+        </div>
+      </div>
+      <div class="instr"><small id="i-togo-label">To destination</small><span class="v" id="i-togo">--</span><span class="u">km</span><div class="sub" id="i-eta"></div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Connection</h3>
+    <div class="links">
+      <div class="link-row">
+        <div class="name">Satellite link<small>Round trip from the cabin to the internet</small></div>
+        <div class="rtt" id="l-sat">--</div>
+        <svg id="sp-sat" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="link-row">
+        <div class="name">Your usual route<small>Round trip to Google through your proxy or VPN, if any</small></div>
+        <div class="rtt" id="l-surge">--</div>
+        <svg id="sp-surge" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Progress</h3>
+    <div class="progress"><svg id="progress"></svg></div>
+  </div>
+
+  <div class="section photos" id="photos" hidden>
+    <h3 id="photos-title">This aircraft</h3>
+    <figure>
+      <img id="ph-img" alt="">
+      <figcaption><span id="ph-cap"></span><span class="nav"><button id="ph-prev" aria-label="Previous photo">‹</button><button id="ph-next" aria-label="Next photo">›</button></span></figcaption>
+    </figure>
+  </div>
+
+  <div class="section">
+    <h3>Flight log</h3>
+    <ol class="log" id="log"></ol>
+  </div>
+
+  <button class="notify" id="notify">Notify me when we're back online</button>
+  <p class="source" id="source"></p>
+</section>
+
+<div class="celebrate" id="celebrate" hidden>
+  <img src="photos/b1135-cutout.png" alt="">
+  <div>
+    <h2>We're so back.</h2>
+    <p id="cel-sub">Out of Russian airspace and the satellite is talking again.</p>
+  </div>
+</div>
+
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script>
+"use strict";
+
+// ---------- constants ----------
+// Origin and destination come from the aircraft's own feed, via /api/route.
+let ORIG = { code: "---", city: "", name: "", ll: [0, 0] }, DEST = { code: "---", city: "", name: "", ll: [0, 0] }, ROUTE = {};
+const R_KM = 6371.0088;
+const KT_KMH = 1.852;
+const CITIES = [
+  ["Beijing", 116.40, 39.90], ["Wuhan", 114.30, 30.59], ["Xi'an", 108.94, 34.34], ["Hohhot", 111.75, 40.84],
+  ["Ulaanbaatar", 106.92, 47.92], ["Irkutsk", 104.28, 52.29], ["Krasnoyarsk", 92.87, 56.01],
+  ["Novosibirsk", 82.93, 55.03], ["Omsk", 73.37, 54.99], ["Yekaterinburg", 60.60, 56.84],
+  ["Kazan", 49.11, 55.79], ["Moscow", 37.62, 55.75], ["St Petersburg", 30.31, 59.94],
+  ["Helsinki", 24.94, 60.17], ["Riga", 24.11, 56.95], ["Stockholm", 18.07, 59.33],
+  ["Warsaw", 21.01, 52.23], ["Berlin", 13.40, 52.52], ["Copenhagen", 12.57, 55.68],
+  ["Amsterdam", 4.90, 52.37], ["Almaty", 76.95, 43.24], ["Astana", 71.43, 51.13], ["Minsk", 27.56, 53.90],
+];
+const PHOTOS = {   // by registration; shown only when you're on that aircraft
+  "B-1135": [
+    { src: "photos/commons-150920.jpg", alt: "Hainan Airlines Boeing 787-9 B-1135 on approach, gear down, against a blue sky",
+      credit: 'N509FZ, <a href="https://commons.wikimedia.org/wiki/File:B-1135@PEK_(20190101150920).jpg" target="_blank" rel="noopener">CC BY-SA 4.0</a>, Beijing 2019' },
+    { src: "photos/commons-150921.jpg", alt: "B-1135 a second later on the same approach into Beijing Capital",
+      credit: 'N509FZ, <a href="https://commons.wikimedia.org/wiki/File:B-1135@PEK_(20190101150921).jpg" target="_blank" rel="noopener">CC BY-SA 4.0</a>, Beijing 2019' },
+  ],
+};
+const SIM = new URLSearchParams(location.search).get("sim"); // approach | over | waiting | back
+
+// ---------- helpers ----------
+const $ = (id) => document.getElementById(id);
+const km = (a, b) => d3.geoDistance(a, b) * R_KM;
+const fmt = (n) => Math.round(n).toLocaleString("en-GB");
+const tz = (zone) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: zone });
+const T_UTC = tz("UTC");
+const utc = (ms) => T_UTC.format(ms) + " UTC";
+function dur(min) {
+  if (min == null || !isFinite(min)) return "";
+  min = Math.max(0, Math.round(min));
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
+}
+
+// ---------- state ----------
+let world, russia, land, borders;
+let track = [];
+let lastT = 0;
+let server = null;
+let pred = null, predAt = 0;
+const zoneEvents = [];
+let zoneCheckT = 0, zoneLast = null;
+let mode = "route";
+let prevPhase = null;
+let wantNotify = false;
+
+// ---------- map ----------
+const svg = d3.select("#map");
+const gWorld = d3.select("#world");
+const gOver = d3.select("#overlay");
+const projection = d3.geoConicConformal().parallels([40, 62]).rotate([-58, 0]);
+const path = d3.geoPath(projection);
+let transform = d3.zoomIdentity;
+const zoom = d3.zoom().scaleExtent([1, 24]).on("zoom", (e) => {
+  transform = e.transform;
+  gWorld.attr("transform", transform);
+  d3.select("#hatch").attr("patternTransform", `rotate(45) scale(${1 / transform.k})`);
+  if (e.sourceEvent) setMode("free");
+  drawOverlay();
+});
+svg.call(zoom);
+
+const P = (ll) => transform.apply(projection(ll));
+
+function size() {
+  const r = svg.node().getBoundingClientRect();
+  return [r.width, r.height];
+}
+
+function fitProjection() {
+  const [w, h] = size();
+  // Frame the great-circle route with some room either side, on a conic centred on it.
+  const interp = d3.geoInterpolate(ORIG.ll, DEST.ll), pts = d3.range(0, 1.0001, 0.05).map(interp);
+  const lats = pts.map((p) => p[1]), lo = Math.max(-75, Math.min(...lats) - 3), hi = Math.min(75, Math.max(...lats) + 3);
+  projection.rotate([-interp(0.5)[0], 0]).parallels([lo, hi]);
+  const frame = { type: "MultiPoint", coordinates: pts.flatMap(([x, y]) => [[x, y + 7], [x, y - 7]]) };
+  const side = Math.min(170, w * 0.12);
+  projection.fitExtent([[side, 40], [w - side, h - 40]], frame);
+}
+
+function drawWorld() {
+  gWorld.selectAll("*").remove();
+  gWorld.append("path").datum({ type: "Sphere" }).attr("d", path).attr("fill", "var(--water)");
+  gWorld.append("path").datum(d3.geoGraticule10()).attr("class", "graticule").attr("d", path);
+  gWorld.append("path").datum(land).attr("class", "land").attr("d", path);
+  gWorld.append("path").datum(russia).attr("class", "zone-fill").attr("d", path);
+  gWorld.append("path").datum(borders).attr("class", "borders").attr("d", path);
+  gWorld.append("path").datum(russia).attr("class", "zone-edge").attr("d", path);
+  gWorld.append("path").datum({ type: "LineString", coordinates: [ORIG.ll, DEST.ll] }).attr("class", "planned").attr("d", path);
+  gWorld.append("g").attr("id", "trackLayer");
+  drawTrack();
+}
+
+function drawTrack() {
+  const g = gWorld.select("#trackLayer");
+  if (g.empty()) return;
+  g.selectAll("*").remove();
+  if (!track.length) return;
+  const first = track[0];
+  g.append("path").datum({ type: "LineString", coordinates: [ORIG.ll, [first.lon, first.lat]] }).attr("class", "before").attr("d", path);
+  // Split the flown track into runs by link state so the blackout shows up in red.
+  let run = [track[0]];
+  const flush = () => {
+    if (run.length > 1) g.append("path")
+      .datum({ type: "LineString", coordinates: run.map((p) => [p.lon, p.lat]) })
+      .attr("class", "flown" + (run[0].online === false ? " offline" : "")).attr("d", path);
+  };
+  for (let i = 1; i < track.length; i++) {
+    const p = track[i];
+    run.push(p);
+    if ((p.online === false) !== (run[0].online === false)) { flush(); run = [p]; }
+  }
+  flush();
+  const cur = [track.at(-1).lon, track.at(-1).lat];
+  g.append("path").datum({ type: "LineString", coordinates: [cur, DEST.ll] }).attr("class", "ahead").attr("d", path);
+}
+
+function drawOverlay() {
+  gOver.selectAll("*").remove();
+  const [w, h] = size();
+  const inView = ([x, y]) => x > -40 && y > -40 && x < w + 40 && y < h + 40;
+
+  const zl = P([84, 62.5]);
+  if (inView(zl)) gOver.append("text").attr("class", "zone-label").attr("x", zl[0]).attr("y", zl[1]).attr("text-anchor", "middle")
+    .text("Russian airspace: satellite blackout expected");
+
+  // Live annotations win: drop city names that would crowd the plane or a gate label.
+  const busy = [];
+  if (track.length) busy.push({ xy: P([track.at(-1).lon, track.at(-1).lat]), rx: 120, ry: 50 });
+  for (const g of [pred?.enterGate, pred?.exitGate]) if (g) busy.push({ xy: P(g.ll), rx: 150, ry: 30 });
+  const crowded = ([x, y]) => busy.some((b) => Math.abs(b.xy[0] - x) < b.rx && Math.abs(b.xy[1] - y) < b.ry);
+
+  for (const [name, lon, lat] of CITIES) {
+    const xy = P([lon, lat]);
+    if (!inView(xy) || crowded(xy)) continue;
+    const g = gOver.append("g").attr("class", "city").attr("transform", `translate(${xy})`);
+    g.append("circle").attr("r", 2.2);
+    g.append("text").attr("x", 5).attr("y", -4).text(name);
+  }
+
+  for (const ap of [ORIG, DEST]) {
+    const xy = P(ap.ll);
+    const g = gOver.append("g").attr("class", "airport").attr("transform", `translate(${xy})`);
+    g.append("circle").attr("r", 6);
+    g.append("text").attr("x", ap === DEST ? -10 : 10).attr("y", 18).attr("text-anchor", ap === DEST ? "end" : "start").text(`${ap.code} ${ap.city}`);
+  }
+
+  if (pred) {
+    // Entry label hangs below-left (the plane and its data block sit above-right);
+    // exit label sits above, clear of the Baltic city names.
+    const spots = { enter: { x: -12, y: 22, anchor: "end" }, exit: { x: 0, y: -14, anchor: "middle" } };
+    for (const [kind, gate] of [["enter", pred.enterGate], ["exit", pred.exitGate]]) {
+      if (!gate) continue;
+      const xy = P(gate.ll), s = spots[kind];
+      const g = gOver.append("g").attr("class", "gate " + kind).attr("transform", `translate(${xy})`);
+      g.append("circle").attr("r", 6);
+      g.append("text").attr("x", s.x).attr("y", s.y).attr("text-anchor", s.anchor)
+        .text(kind === "enter" ? `Signal lost around ${utc(gate.at)}` : `Back online around ${utc(gate.at)}`);
+    }
+  }
+
+  drawPlane();
+}
+
+function drawPlane() {
+  if (!track.length) return;
+  const p = track.at(-1);
+  const here = [p.lon, p.lat];
+  const xy = P(here);
+  // Screen direction of travel: project a point 60 km ahead along the true heading.
+  const ahead = destination(here, p.hdg ?? 0, 60);
+  const xy2 = P(ahead);
+  const dx = xy2[0] - xy[0], dy = xy2[1] - xy[1];
+  const east = dx > 0;
+  const clamp = (a) => Math.max(-12, Math.min(12, a));   // a side-view photo only hints at direction
+  const ang = clamp((Math.atan2(-dy, Math.abs(dx)) * 180) / Math.PI);
+  const W = Math.min(150, 96 + transform.k * 6), H = W * (165 / 640);
+
+  // ATC-style data block: callsign, flight level and trend, ground speed.
+  const fl = Math.round((p.alt ?? 0) / 100);
+  const trend = altTrend();
+  const db = gOver.append("g").attr("class", "datablock").attr("transform", `translate(${xy[0] + W * 0.42},${xy[1] - H * 1.25})`);
+  db.append("line").attr("x1", -W * 0.18).attr("y1", H * 0.9).attr("x2", -2).attr("y2", 4);
+  db.append("text").attr("class", "cs").attr("x", 2).attr("y", 0).text(ROUTE.callsign || "");
+  db.append("text").attr("x", 2).attr("y", 16).text(`${String(fl).padStart(3, "0")}${trend} ${p.gs ?? "--"}`);
+
+  const g = gOver.append("g").attr("transform", `translate(${xy})`);
+  g.append("ellipse").attr("cx", 0).attr("cy", H * 0.75).attr("rx", W * 0.36).attr("ry", H * 0.12).attr("fill", "rgba(28,42,68,0.18)");
+  g.append("image").attr("href", "photos/b1135-cutout.png")
+    .attr("width", W).attr("height", H).attr("x", -W / 2).attr("y", -H / 2)
+    .attr("transform", east ? `rotate(${-ang}) scale(-1,1)` : `rotate(${ang})`);
+  g.append("circle").attr("class", "fix").attr("r", 4);
+}
+
+function destination([lon, lat], brg, dKm) {
+  const r = Math.PI / 180, d = dKm / R_KM, b = brg * r, f1 = lat * r, l1 = lon * r;
+  const f2 = Math.asin(Math.sin(f1) * Math.cos(d) + Math.cos(f1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(f1), Math.cos(d) - Math.sin(f1) * Math.sin(f2));
+  return [l2 / r, f2 / r];
+}
+
+function altTrend() {
+  if (track.length < 2) return "";
+  const now = track.at(-1);
+  const ref = track.find((p) => p.t >= now.t - 60) || track[0];
+  const d = (now.alt ?? 0) - (ref.alt ?? 0);
+  return d > 150 ? "↑" : d < -150 ? "↓" : "";
+}
+
+function setMode(m) {
+  mode = m;
+  $("btn-route").setAttribute("aria-pressed", m === "route");
+  $("btn-follow").setAttribute("aria-pressed", m === "follow");
+}
+
+function goRoute(animate = true) {
+  setMode("route");
+  const t = d3.zoomIdentity;
+  (animate ? svg.transition().duration(900) : svg).call(zoom.transform, t);
+  setMode("route");
+}
+
+function goFollow(animate = true) {
+  if (!track.length) return;
+  setMode("follow");
+  const [w, h] = size();
+  const k = 3.4;
+  const [x, y] = projection([track.at(-1).lon, track.at(-1).lat]);
+  const t = d3.zoomIdentity.translate(w / 2 - k * x, h / 2 - k * y).scale(k);
+  (animate ? svg.transition().duration(900) : svg).call(zoom.transform, t);
+  setMode("follow");
+}
+
+$("btn-route").onclick = () => goRoute();
+$("btn-follow").onclick = () => goFollow();
+
+// ---------- zone logic ----------
+const inRussia = (ll) => d3.geoContains(russia, ll);
+
+function predict() {
+  if (!track.length) return null;
+  const p = track.at(-1);
+  const cur = [p.lon, p.lat];
+  const toGo = km(cur, DEST.ll);
+  const kmh = (p.gs || 470) * KT_KMH;
+  const n = Math.max(2, Math.ceil(toGo / 12));
+  const interp = d3.geoInterpolate(cur, DEST.ll);
+  const inside = inRussia(cur);
+  let prev = inside, enter = null, exit = null;
+  for (let i = 1; i <= n; i++) {
+    const f = i / n, ll = interp(f), c = inRussia(ll);
+    if (c && !prev && !enter) enter = { f, ll };
+    if (!c && prev) exit = { f, ll };   // keep the last exit (Kaliningrad, etc.)
+    prev = c;
+  }
+  // The flown route is longer than the great circle (airways, winds). Stretch our
+  // timings so they agree with the aircraft's own arrival estimate.
+  const gcMs = (toGo / kmh) * 3600e3;
+  const acEta = aircraftEta(server?.flight);
+  const stretch = acEta ? Math.max(1, Math.min(1.6, (acEta - Date.now()) / gcMs)) : 1;
+  const at = (g) => g && { ll: g.ll, km: g.f * toGo, at: Date.now() + g.f * gcMs * stretch };
+  return { toGo, kmh, inside, enterGate: at(enter), exitGate: at(exit), etaMs: acEta || Date.now() + gcMs, fromAircraft: !!acEta };
+}
+
+function aircraftEta(f) {
+  // The seatback's minutes-to-go. ("estimated_arrival_time_utc" is really London local time.)
+  if (f?.time_to_destination_minutes == null) return null;
+  return (server?.flight_at ? server.flight_at * 1000 : Date.now()) + f.time_to_destination_minutes * 60e3;
+}
+
+function scanZone(newPts) {
+  for (const p of newPts) {
+    const isLast = p === track.at(-1);
+    if (p.t - zoneCheckT < 30 && !isLast) continue;
+    zoneCheckT = p.t;
+    const c = inRussia([p.lon, p.lat]);
+    if (zoneLast !== null && c !== zoneLast) zoneEvents.push({ t: p.t, type: c ? "zone_enter" : "zone_exit" });
+    zoneLast = c;
+  }
+}
+
+// ---------- status ----------
+function phase() {
+  const online = server?.online;
+  const inside = pred?.inside;
+  const entered = zoneEvents.some((e) => e.type === "zone_enter");
+  if (SIM) return SIM;
+  if (inside) return online === false ? "over" : "over-online";
+  if (entered) return online === false ? "waiting" : "back";
+  return online === false ? "early-loss" : "approach";
+}
+
+function renderStatus() {
+  const ph = phase();
+  const el = $("status");
+  el.className = "status " + ({ over: "over", back: "back", waiting: "waiting", "early-loss": "waiting" }[ph] || "");
+  const enter = pred?.enterGate, exit = pred?.exitGate;
+  const zIn = zoneEvents.find((e) => e.type === "zone_enter");
+  const zOut = [...zoneEvents].reverse().find((e) => e.type === "zone_exit");
+  let title, sub, num = null, unit = "";
+  const rtt = server?.probe?.rtt_ms;
+  switch (ph) {
+    case "approach":
+      title = "Online, for now";
+      sub = enter ? `Russian airspace starts in about ${fmt(enter.km)} km. Expect the satellite to drop around ${utc(enter.at)}.` : "No blackout zone ahead on the current track.";
+      if (enter) { num = dur((enter.at - Date.now()) / 60e3); unit = "until the blackout zone"; }
+      break;
+    case "over-online":
+      title = "Over Russia, still online";
+      sub = `The link is holding. Make it count${exit ? `: the zone ends around ${utc(exit.at)}` : ""}.`;
+      if (exit) { num = dur((exit.at - Date.now()) / 60e3); unit = "until we leave Russia"; }
+      break;
+    case "over":
+      title = "It's so over.";
+      sub = `Over Russia${zIn ? ` since ${utc(zIn.t * 1e3)}` : ""}, satellite down.${exit ? ` We leave the zone around ${utc(exit.at)}.` : ""}`;
+      if (exit) { num = dur((exit.at - Date.now()) / 60e3); unit = "until we're back"; }
+      break;
+    case "waiting":
+      title = "Out of Russia, waiting";
+      sub = `Clear of the zone${zOut ? ` since ${utc(zOut.t * 1e3)}` : ""}. The satellite hasn't answered yet; reacquiring can take a few minutes.`;
+      break;
+    case "early-loss":
+      title = "Link down, not Russia";
+      sub = "We're not in the blackout zone yet. The satellite is just having a moment; the probe keeps trying every 15 s.";
+      break;
+    case "back":
+      title = "We're so back.";
+      sub = `Clear of Russian airspace${zOut ? ` since ${utc(zOut.t * 1e3)}` : ""}, and the satellite answers in ${rtt ? (rtt / 1000).toFixed(1) + " s" : "under 2 s"}.`;
+      if (pred) { num = dur((pred.etaMs - Date.now()) / 60e3); unit = `to ${DEST.city}`; }
+      break;
+  }
+  $("st-title").textContent = title;
+  $("st-sub").textContent = sub;
+  $("st-count").hidden = !num;
+  $("st-num").textContent = num || "";
+  $("st-unit").textContent = unit;
+
+  // Celebrate on a live transition, or on first load shortly after the exit.
+  const recentExit = zoneEvents.some((e) => e.type === "zone_exit" && Date.now() - e.t * 1e3 < 15 * 60e3);
+  if (ph === "back" && prevPhase !== "back" && (prevPhase || SIM || recentExit)) celebrate();
+  prevPhase = ph;
+}
+
+function celebrate() {
+  const el = $("celebrate");
+  el.hidden = false;
+  const img = el.querySelector("img");
+  img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+  setTimeout(() => (el.hidden = true), 9000);
+  if (wantNotify && "Notification" in window && Notification.permission === "granted") {
+    new Notification("We're so back.", { body: `${ROUTE.flight || "The flight"} is out of Russian airspace and the internet is up.` });
+  }
+}
+$("celebrate").onclick = () => ($("celebrate").hidden = true);
+
+$("notify").onclick = async () => {
+  if (!("Notification" in window)) return;
+  const p = await Notification.requestPermission();
+  wantNotify = p === "granted";
+  $("notify").textContent = wantNotify ? "You'll get a notification when we're back" : "Notifications are blocked in this browser";
+  $("notify").disabled = true;
+};
+
+// ---------- panel ----------
+function renderPanel() {
+  const now = Date.now();
+  // Local times as the aircraft reports them, so no time-zone table is needed.
+  const fl = server?.flight;
+  $("clocks").innerHTML = `<b>${T_UTC.format(now)}</b> UTC` + (fl?.time_at_origin ? `<br>${fl.time_at_origin} ${ORIG.city}` : "") + (fl?.time_at_destination ? `<br>${fl.time_at_destination} ${DEST.city}` : "");
+
+  const f = server?.flight;
+  if (f) {
+    const dep = Date.parse(f.takeoff_time_utc);
+    $("f-dep").textContent = isFinite(dep) ? `${ORIG.code} ${T_UTC.format(dep)}Z` : ORIG.code;
+  }
+  const p = track.at(-1);
+  if (p) {
+    $("i-alt").textContent = fmt(p.alt ?? 0);
+    $("i-fl").textContent = `FL${String(Math.round((p.alt ?? 0) / 100)).padStart(3, "0")} ${altTrend() === "↑" ? "climbing" : altTrend() === "↓" ? "descending" : "level"}`;
+    $("i-gs").textContent = p.gs ?? "--";
+    $("i-kmh").textContent = p.gs ? `${fmt(p.gs * KT_KMH)} km/h` : "";
+    $("i-hdg").textContent = String(p.hdg ?? "--").padStart(3, "0");
+    $("needle").setAttribute("transform", `rotate(${p.hdg ?? 0})`);
+  }
+  if (pred) {
+    $("i-togo").textContent = fmt(pred.toGo);
+    $("i-eta").textContent = `about ${dur((pred.etaMs - now) / 60e3)}, ${T_UTC.format(pred.etaMs)}Z`;
+    $("f-arr").textContent = `${DEST.code} ${T_UTC.format(pred.etaMs)}Z`;
+  }
+
+  // Connection
+  const pr = server?.probe;
+  const showRtt = (el, v) => { el.textContent = v == null ? "No reply" : (v / 1000).toFixed(1) + " s"; el.classList.toggle("down", v == null); };
+  if (pr && pr.at) { showRtt($("l-sat"), pr.rtt_ms); showRtt($("l-surge"), pr.surge_ms); }
+  spark("sp-sat", (pr?.history || []).map((h) => [h[0], h[1]]));
+  spark("sp-surge", (pr?.history || []).map((h) => [h[0], h[2]]));
+
+  renderProgress();
+  renderLog();
+
+  const age = server?.flight_at ? (server.server_time - server.flight_at) : null;
+  const src = $("source");
+  if (server?.flight_error) {
+    src.className = "source err";
+    src.textContent = `Can't reach the aircraft's flight data server (${server.flight_error}). Check the Mac is still on the cabin Wi-Fi.`;
+  } else if (age != null) {
+    src.className = "source";
+    src.textContent = `Position from the aircraft's own avionics feed, ${Math.max(0, Math.round(age))} s old. ${track.length.toLocaleString()} points logged.`;
+  }
+}
+
+function spark(id, pts) {
+  const s = d3.select("#" + id);
+  const w = s.node().clientWidth || 300, h = 28;
+  s.attr("viewBox", `0 0 ${w} ${h}`).selectAll("*").remove();
+  if (pts.length < 2) return;
+  const x = d3.scaleLinear().domain(d3.extent(pts, (d) => d[0])).range([1, w - 1]);
+  const vals = pts.map((d) => d[1]).filter((v) => v != null);
+  const y = d3.scaleLinear().domain([0, Math.max(3000, d3.max(vals) || 0)]).range([h - 2, 2]);
+  s.append("path").attr("class", "spark").attr("d", d3.line().defined((d) => d[1] != null).x((d) => x(d[0])).y((d) => y(d[1]))(pts));
+  for (const d of pts.filter((d) => d[1] == null)) s.append("line").attr("class", "spark-down").attr("x1", x(d[0])).attr("x2", x(d[0])).attr("y1", 2).attr("y2", h - 2);
+}
+
+function renderProgress() {
+  const s = d3.select("#progress");
+  const w = s.node().clientWidth || 340;
+  s.attr("viewBox", `0 0 ${w} 54`).selectAll("*").remove();
+  if (!pred) return;
+  const total = km(ORIG.ll, DEST.ll);
+  const done = Math.max(0, Math.min(1, 1 - pred.toGo / total));
+  const x = d3.scaleLinear().domain([0, 1]).range([4, w - 4]);
+  const frac = (kmAhead) => Math.min(1, done + kmAhead / total);
+  let z0 = null, z1 = null;
+  const zIn = zoneEvents.find((e) => e.type === "zone_enter");
+  if (pred.inside) { z0 = zIn ? null : done; z1 = pred.exitGate ? frac(pred.exitGate.km) : 1; }
+  else if (pred.enterGate) { z0 = frac(pred.enterGate.km); z1 = pred.exitGate ? frac(pred.exitGate.km) : 1; }
+  if (zIn) {
+    const pt = track.find((p) => p.t >= zIn.t);
+    if (pt) z0 = 1 - km([pt.lon, pt.lat], DEST.ll) / total;
+  }
+  const y = 22;
+  s.append("line").attr("x1", x(0)).attr("x2", x(1)).attr("y1", y).attr("y2", y).attr("stroke", "#93ACBE").attr("stroke-width", 2).attr("stroke-dasharray", "6 4");
+  if (z0 != null && z1 != null) s.append("rect").attr("x", x(z0)).attr("y", y - 7).attr("width", Math.max(2, x(z1) - x(z0))).attr("height", 14).attr("fill", "url(#hatch)").attr("stroke", "#C8302B").attr("stroke-width", 1.4);
+  s.append("line").attr("x1", x(0)).attr("x2", x(done)).attr("y1", y).attr("y2", y).attr("stroke", "#A3227B").attr("stroke-width", 4);
+  s.append("circle").attr("cx", x(done)).attr("cy", y).attr("r", 6).attr("fill", "#A3227B").attr("stroke", "#fff").attr("stroke-width", 2);
+  s.append("text").attr("class", "ap").attr("x", x(0)).attr("y", 48).text(ORIG.code);
+  s.append("text").attr("class", "ap").attr("x", x(1)).attr("y", 48).attr("text-anchor", "end").text(DEST.code);
+  s.append("text").attr("x", x(done)).attr("y", 48).attr("text-anchor", done < 0.12 ? "start" : done > 0.88 ? "end" : "middle").text(`${Math.round(done * 100)}%`);
+}
+
+function renderLog() {
+  const items = [];
+  const f = server?.flight;
+  if (f?.takeoff_time_utc) items.push({ t: Date.parse(f.takeoff_time_utc), text: `Took off from ${ORIG.city}` });
+  if (track.length) items.push({ t: track[0].t * 1e3, text: "Tracking started" });
+  for (const e of server?.events || []) {
+    if (e.type === "link_down") items.push({ t: e.t * 1e3, text: "<b>Internet lost</b>", cls: "bad" });
+    if (e.type === "link_up" && items.some((i) => i.cls === "bad")) items.push({ t: e.t * 1e3, text: "<b>Internet restored</b>", cls: "good" });
+  }
+  for (const e of zoneEvents) items.push({ t: e.t * 1e3, text: e.type === "zone_enter" ? "<b>Entered Russian airspace</b>" : "<b>Left Russian airspace</b>", cls: e.type === "zone_enter" ? "bad" : "good" });
+  if (pred?.enterGate && !pred.inside) items.push({ t: pred.enterGate.at, text: "Enters Russian airspace", cls: "expected" });
+  if (pred?.exitGate) items.push({ t: pred.exitGate.at, text: "Leaves Russian airspace", cls: "expected" });
+  if (pred) items.push({ t: pred.etaMs, text: `Lands at ${DEST.name}${pred.fromAircraft ? " (aircraft's estimate)" : ""}`, cls: "expected" });
+  items.sort((a, b) => a.t - b.t);
+  $("log").innerHTML = items.map((i) => `<li class="${i.cls || ""}"><time>${i.cls === "expected" ? "~" : ""}${T_UTC.format(i.t)}Z</time><span>${i.text}</span></li>`).join("");
+}
+
+// ---------- photos ----------
+let photoIdx = 0;
+function showPhoto(i) {
+  const list = PHOTOS[ROUTE.tail] || [];
+  if (!list.length) return;
+  photoIdx = (i + list.length) % list.length;
+  const ph = list[photoIdx];
+  $("ph-img").src = ph.src;
+  $("ph-img").alt = ph.alt;
+  $("ph-cap").innerHTML = `Photo: ${ph.credit}`;
+}
+$("ph-prev").onclick = () => showPhoto(photoIdx - 1);
+$("ph-next").onclick = () => showPhoto(photoIdx + 1);
+
+// ---------- data loop ----------
+async function tick() {
+  try {
+    const [st, pts] = await Promise.all([
+      fetch("/api/state").then((r) => r.json()),
+      fetch(`/api/track?since=${lastT}`).then((r) => r.json()),
+    ]);
+    server = st;
+    if (pts.length) {
+      track.push(...pts);
+      lastT = track.at(-1).t;
+      scanZone(pts);
+      if (Date.now() - predAt > 20e3 || !pred) { pred = predict(); predAt = Date.now(); }
+      drawTrack();
+      if (mode === "follow") goFollow(false);
+      else drawOverlay();
+    }
+  } catch (e) {
+    server = { ...(server || {}), flight_error: "the tracker server on this Mac isn't responding" };
+  }
+  renderStatus();
+  renderPanel();
+}
+
+async function loadRoute() {
+  for (;;) {
+    try { const r = await (await fetch("/api/route")).json(); if (r.origin && r.dest) return r; } catch {}
+    $("route-name").textContent = "Waiting for the aircraft's flight data";
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+}
+
+function applyRoute(r) {
+  ROUTE = r;
+  const mk = (a) => ({ code: a.code, city: a.city, name: a.name, ll: [a.lon, a.lat] });
+  ORIG = mk(r.origin); DEST = mk(r.dest);
+  document.title = `${r.flight} Live`;
+  $("callsign").textContent = r.flight;
+  $("legend-title").textContent = `${r.flight} en-route chart`;
+  $("route-name").textContent = `${ORIG.city} to ${DEST.name.replace(/ (International )?Airport$/, "")}`;
+  $("f-dep").textContent = ORIG.code; $("f-arr").textContent = DEST.code;
+  $("f-tail").textContent = r.tail || "---";
+  $("f-type").textContent = (r.type || "---").replace(/^B7(\d)7-(\d+)$/, "B7$1$2");   // B787-9 -> B789
+  $("i-togo-label").textContent = `To ${DEST.city}`;
+  const photos = PHOTOS[r.tail];
+  $("photos").hidden = !photos;
+  if (photos) $("photos-title").textContent = `This aircraft, ${r.tail}`;
+}
+
+async function init() {
+  world = await (await fetch("vendor/countries-50m.json")).json();
+  const countries = topojson.feature(world, world.objects.countries);
+  russia = countries.features.find((f) => f.id === "643");
+  land = topojson.feature(world, world.objects.land);
+  borders = topojson.mesh(world, world.objects.countries, (a, b) => a !== b);
+  applyRoute(await loadRoute());
+  fitProjection();
+  drawWorld();
+  drawOverlay();
+  showPhoto(0);
+  await tick();
+  setInterval(tick, 3000);
+  setInterval(() => renderPanel(), 1000);
+  addEventListener("resize", () => { fitProjection(); drawWorld(); drawOverlay(); renderPanel(); });
+}
+init();
+</script>
+</body>
+</html>

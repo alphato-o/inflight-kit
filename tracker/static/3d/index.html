@@ -1,0 +1,1714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Voxel</title>
+<style>
+  :root {
+    --hud: #46FF92;
+    --hud-dim: rgba(70, 255, 146, 0.55);
+    --mc-shadow: #3F3F3F;
+    --mc-gold: #FFFF55;
+    --mc-red: #FF5555;
+    --mc-green: #55FF55;
+    --mc-gray: #AAAAAA;
+    --f-mc: Silom, Monaco, "Courier New", monospace;
+    --f-hud: "DIN Alternate", "Avenir Next Condensed", "Helvetica Neue", sans-serif;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: var(--f-mc); }
+  #gl { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+  /* Minecraft text: hard 2px drop shadow, no blur */
+  .mc { text-shadow: 2px 2px 0 var(--mc-shadow); }
+
+  /* ---------- mode buttons (stone buttons) ---------- */
+  .modes { position: fixed; left: 16px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 5; max-width: calc(100vw - 420px); }
+  .modes button, .modes a {
+    font: 14px/1 var(--f-mc); color: #E0E0E0; text-decoration: none;
+    background: #6F6F6F; padding: 9px 12px 8px; cursor: pointer;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #A8A8A8, inset -2px -3px 0 #3E3E3E;
+    text-shadow: 2px 2px 0 #3F3F3F;
+  }
+  .modes button:hover, .modes a:hover { background: #7E89B8; box-shadow: inset 2px 2px 0 #BCC6F0, inset -2px -3px 0 #4A5380; color: #FFFFA0; }
+  .modes button[aria-pressed="true"] { border-color: #fff; color: #FFFFA0; }
+  .modes button:focus-visible, .modes a:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .modes kbd { font: 12px var(--f-mc); color: #C8C8C8; margin-left: 6px; }
+
+  /* ---------- F3 debug screen ---------- */
+  .f3 { position: fixed; left: 6px; top: 6px; z-index: 4; font: 14px/1 var(--f-mc); pointer-events: none; }
+  .f3 div { display: table; background: rgba(80, 80, 80, 0.55); padding: 3px 4px 2px; margin-bottom: 1px; color: #E0E0E0; text-shadow: 2px 2px 0 #3F3F3F; white-space: pre; }
+  .f3 .t { color: var(--mc-gold); }
+  .f3 .bad { color: var(--mc-red); }
+  .f3 .good { color: var(--mc-green); }
+  .f3[hidden] { display: none; }
+
+  /* ---------- advancement toasts ---------- */
+  .toasts { position: fixed; right: 0; top: 0; z-index: 6; display: grid; gap: 4px; pointer-events: none; }
+  .toast {
+    width: 340px; display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px;
+    padding: 8px 12px 8px 8px;
+    background: #212121; border: 2px solid #000; box-shadow: inset 2px 2px 0 #555, inset -2px -2px 0 #111;
+    animation: toast-in 450ms steps(6) both;
+  }
+  .toast.out { animation: toast-out 450ms steps(6) both; }
+  .toast .icon { width: 52px; height: 40px; background: #3a3a3a center / contain no-repeat; image-rendering: pixelated; border: 2px solid #111; }
+  .toast b { display: block; font: 14px/1.25 var(--f-mc); color: var(--mc-gold); text-shadow: 2px 2px 0 #3F3F15; }
+  .toast span { display: block; font: 14px/1.3 var(--f-mc); color: #fff; text-shadow: 2px 2px 0 #3F3F3F; }
+  .toast.bad b { color: var(--mc-red); text-shadow: 2px 2px 0 #3F1515; }
+  .toast.good b { color: var(--mc-green); text-shadow: 2px 2px 0 #153F15; }
+  @keyframes toast-in { from { transform: translateX(110%); } }
+  @keyframes toast-out { to { transform: translateX(110%); } }
+
+  /* ---------- cockpit HUD ---------- */
+  #hud { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 3; pointer-events: none; }
+  #hud[hidden] { display: none; }
+  #hud text { font-family: var(--f-hud); fill: var(--hud); }
+  #hud .glow { filter: drop-shadow(0 0 3px rgba(70, 255, 146, 0.75)); }
+  #hud line, #hud path, #hud rect, #hud circle, #hud polyline { stroke: var(--hud); fill: none; stroke-width: 2; }
+  #hud .warn text { fill: #FFB347; }
+  #hud .bad text { fill: #FF5A4E; }
+
+  /* ---------- loading screen (dirt) ---------- */
+  #loading {
+    position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; text-align: center;
+    background-color: #59412A; background-size: 64px 64px; image-rendering: pixelated;
+  }
+  #loading[hidden] { display: none; }
+  #loading h1 { font: 22px/1.4 var(--f-mc); margin: 0 0 14px; font-weight: normal; }
+  #loading .bar { width: 320px; height: 8px; background: #808080; border: 2px solid #000; margin: 0 auto; }
+  #loading .bar i { display: block; height: 100%; width: 0; background: #80FF20; }
+  #loading p { font: 14px var(--f-mc); color: var(--mc-gray); margin: 12px 0 0; }
+
+  /* F3 right column: the aircraft's own systems */
+  .f3r { position: fixed; right: 6px; top: 6px; z-index: 4; font: 14px/1 var(--f-mc); pointer-events: none; display: grid; justify-items: end; }
+  .f3r div { background: rgba(80, 80, 80, 0.55); padding: 3px 4px 2px; margin-bottom: 1px; color: #E0E0E0; text-shadow: 2px 2px 0 #3F3F3F; white-space: pre; }
+  .f3r .t { color: var(--mc-gold); }
+  .f3r .bad { color: var(--mc-red); }
+  .f3r .good { color: var(--mc-green); }
+  .f3r[hidden] { display: none; }
+  body.data-open .f3r { display: none; }
+
+  /* ---------- aircraft data window (a GUI screen, inventory grey) ---------- */
+  #data {
+    position: fixed; inset: 5vh 6vw 84px; z-index: 7; display: grid; grid-template-rows: auto 1fr;
+    background: #C6C6C6; color: #3F3F3F; border: 2px solid #000;
+    box-shadow: inset 3px 3px 0 #fff, inset -3px -3px 0 #555;
+    font: 14px/1.3 var(--f-mc);
+  }
+  #data[hidden] { display: none; }
+  #data header { display: flex; align-items: baseline; gap: 14px; padding: 12px 16px 8px; }
+  #data h2 { font: 18px var(--f-mc); margin: 0; color: #3F3F3F; font-weight: normal; }
+  #data header p { margin: 0; color: #555; }
+  #data header button { margin-left: auto; font: 14px var(--f-mc); background: #8B8B8B; color: #fff; border: 2px solid #000; box-shadow: inset 2px 2px 0 #C6C6C6, inset -2px -2px 0 #555; padding: 4px 10px; cursor: pointer; text-shadow: 1px 1px 0 #3F3F3F; }
+  #data .body { overflow: auto; padding: 4px 16px 16px; columns: 2 460px; column-gap: 24px; }
+  #data section { break-inside: avoid; margin: 0 0 14px; background: #8B8B8B; border: 2px solid #373737; box-shadow: inset -2px -2px 0 #fff; padding: 2px; }
+  #data h3 { font: 14px var(--f-mc); margin: 0; padding: 6px 8px; color: #fff; text-shadow: 1px 1px 0 #3F3F3F; font-weight: normal; display: flex; justify-content: space-between; gap: 10px; }
+  #data h3 small { font: 12px var(--f-mc); color: #E0E0E0; }
+  #data table { width: 100%; border-collapse: collapse; background: #C6C6C6; }
+  #data td { padding: 3px 8px; border-top: 1px solid #A0A0A0; vertical-align: top; }
+  #data td.k { width: 46%; }
+  #data td.k small { display: block; color: #6A6A6A; font-size: 11.5px; word-break: break-all; }
+  #data td.v { color: #1E1E1E; word-break: break-word; }
+  #data td.v small { display: block; color: #555; font-size: 12px; }
+  #data .null { color: #8A5A00; }
+  #data .true { color: #1A6B1A; }
+  #data .false { color: #8B1A1A; }
+  #data tr.changed td { background: #FFF59A; }
+  #data .note { color: #555; padding: 6px 8px; background: #C6C6C6; }
+
+  /* ---------- minimap: a Minecraft filled map on parchment ---------- */
+  #minimap { position: fixed; right: 16px; bottom: 16px; z-index: 7; width: clamp(240px, 19vw, 360px); padding: 10px;
+    background: #D8C69E; border: 2px solid #3B2A14; box-shadow: inset 0 0 0 3px #B39A6A, inset 0 0 0 6px #E8D9B4;
+    transition: bottom 800ms ease; pointer-events: none; }
+  body.cinema #minimap { bottom: calc(11vh + 14px); }
+  #minimap canvas { display: block; width: 100%; image-rendering: pixelated; border: 2px solid #5A4325; }
+  #minimap p { margin: 6px 2px 0; font: 13px/1.2 var(--f-mc); color: #3B2A14; display: flex; justify-content: space-between; gap: 8px; }
+
+  .credit { position: fixed; left: 16px; bottom: 2px; z-index: 4; font: 10px/1.4 -apple-system, sans-serif; color: rgba(255,255,255,0.6); pointer-events: none; }
+  body.cinema .credit { display: none; }
+  .hint { position: fixed; left: 16px; bottom: 62px; z-index: 4; font: 13px/1.5 var(--f-mc); color: #ddd; text-align: left; pointer-events: none; }
+
+  /* Phi tints h1-h3 and links per Space with :where(...) !important; keep the GUI's own colours. */
+  #data h2 { color: #3F3F3F !important; }
+  #data h3 { color: #fff !important; }
+  .modes a { color: #E0E0E0 !important; text-decoration: none !important; }
+  .modes button, .modes a { border-color: #000 !important; }
+  .modes button[aria-pressed="true"] { border-color: #fff !important; }
+  #loading h1 { color: #fff !important; }
+
+  /* ---------- cinematic: letterbox, fades, captions ---------- */
+  .bars::before, .bars::after { content: ""; position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 5; transition: height 800ms ease; }
+  .bars::before { top: 0; } .bars::after { bottom: 0; }
+  body.cinema .bars::before, body.cinema .bars::after { height: 11vh; }
+  body.cinema .f3, body.cinema .f3r, body.cinema .hint, body.cinema .modes { display: none; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 6; }
+  #caption { position: fixed; left: 5vw; bottom: calc(11vh + 22px); z-index: 7; pointer-events: none; opacity: 0; transition: opacity 900ms ease; }
+  body.cinema #caption.on { opacity: 1; }
+  #caption b { display: block; font: 34px/1.1 var(--f-mc); font-weight: normal; color: #fff; text-shadow: 3px 3px 0 #3F3F3F; }
+  #caption span { display: block; font: 17px/1.4 var(--f-mc); color: #E0E0E0; text-shadow: 2px 2px 0 #3F3F3F; margin-top: 4px; }
+  #cine-hint { position: fixed; right: 18px; top: calc(5.5vh - 8px); z-index: 7; font: 13px var(--f-mc); color: #9a9a9a; display: none; }
+  body.cinema #cine-hint { display: block; }
+  body.recording #cine-hint, body.recording .hint { display: none !important; }
+
+  /* ---------- time remaining: the XP bar ---------- */
+  #xp { position: fixed; left: 50%; transform: translateX(-50%); bottom: 64px; z-index: 7; width: min(620px, 86vw); text-align: center; pointer-events: none; transition: bottom 800ms ease; }
+  body.cinema #xp { bottom: calc(5.5vh - 26px); }
+  #xp .lvl { font: 30px/1 var(--f-mc); color: #80FF20; margin-bottom: 3px;
+    text-shadow: 2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000, 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000; }
+  #xp .bar { position: relative; height: 12px; background: #1b1b1b; border: 2px solid #000; box-shadow: inset 0 2px 0 #3a3a3a; }
+  #xp .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #7EFC20; box-shadow: inset 0 3px 0 #B6FF6A, inset 0 -3px 0 #4FB80A; }
+  #xp .bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 calc(100% / 18 - 2px), rgba(0,0,0,0.55) calc(100% / 18 - 2px) calc(100% / 18)); }
+  #xp .lbl { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px; font: 14px var(--f-mc); color: #fff; text-shadow: 2px 2px 0 #3F3F3F; }
+  #xp .lbl b { font-weight: normal; color: var(--mc-gold); }
+
+  @media (prefers-reduced-motion: reduce) { .toast, .toast.out { animation: none; } .bars::before, .bars::after, #xp { transition: none; } }
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="3D voxel view of the flight"></canvas>
+
+<svg id="hud" hidden aria-hidden="true"></svg>
+<div class="f3" id="f3"></div>
+<div class="f3r" id="f3r"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<div id="data" hidden role="dialog" aria-labelledby="data-title">
+  <header>
+    <h2 id="data-title">Aircraft data</h2>
+    <p id="data-sub">Every field the aircraft's Panasonic server returns, verbatim, refreshed every 10 s.</p>
+    <button id="data-close">Done</button>
+  </header>
+  <div class="body" id="data-body"></div>
+</div>
+
+<nav class="modes" aria-label="Camera">
+  <button data-mode="chase" aria-pressed="true">Chase<kbd>1</kbd></button>
+  <button data-mode="cockpit" aria-pressed="false">Cockpit<kbd>2</kbd></button>
+  <button data-mode="globe" aria-pressed="false">Globe<kbd>3</kbd></button>
+  <button id="btn-data" aria-pressed="false">Aircraft data<kbd>4</kbd></button>
+  <button data-mode="cinema" aria-pressed="false">Cinematic<kbd>5</kbd></button>
+  <a href="/">2D chart</a>
+</nav>
+<div class="bars" aria-hidden="true"></div>
+<div id="fade" aria-hidden="true"></div>
+<div id="caption" aria-live="polite"><b id="cap-title"></b><span id="cap-sub"></span></div>
+<div id="cine-hint" class="mc">Esc or click to take the controls</div>
+<div id="xp" aria-live="off">
+  <div class="lvl" id="xp-lvl">--:--</div>
+  <div class="bar"><i id="xp-fill" style="width:0"></i></div>
+  <div class="lbl"><b id="xp-a">---</b><span id="xp-text">Waiting for the aircraft</span><b id="xp-b">---</b></div>
+</div>
+<div id="minimap" aria-label="Route map"><canvas id="mm" width="200" height="112"></canvas><p><span id="mm-a">---</span><span id="mm-b">---</span></p></div>
+<div class="hint mc" id="hint">Drag to orbit, scroll to zoom<br>F3 toggles the debug screen</div>
+<div class="credit" id="credit">Imagery © Esri, Maxar, Earthstar Geographics. Terrain: AWS Terrain Tiles. Minecraft-style, not affiliated with Mojang.</div>
+
+<div id="loading">
+  <div>
+    <h1 class="mc" id="load-title">Generating terrain</h1>
+    <div class="bar"><i id="load-bar"></i></div>
+    <p class="mc" id="load-sub">Reading elevation and satellite tiles</p>
+  </div>
+</div>
+
+<script src="../vendor/d3.min.js"></script>
+<script src="../vendor/topojson-client.min.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "./vendor/OrbitControls.js";
+
+// ============================================================
+// Scale. One block is 2 km across; vertical is exaggerated 6x,
+// the way seatback moving maps make terrain readable from FL360.
+// ============================================================
+// Block size adapts to altitude: 2 km at cruise, 1 km in the descent, 500 m on final.
+const EXAG = 6;
+const blockKmFor = (b, altM) =>        // with hysteresis so a level-off near a boundary doesn't flap
+  b === 2 ? (altM < 5500 ? 1 : 2) : b === 1 ? (altM > 6500 ? 2 : altM < 1600 ? 0.5 : 1) : (altM > 2200 ? 1 : 0.5);
+const ZOOMS = { 2: { dem: [7, 6, 5], sat: [7, 6, 5, 4] }, 1: { dem: [8, 7, 6, 5], sat: [8, 7, 6, 5, 4] }, 0.5: { dem: [10, 9, 8, 7, 6], sat: [10, 9, 8, 7, 6, 5] } };
+const CHUNK = 256;                      // blocks per chunk side (512 km)
+const REBUILD_AT = 60;                  // blocks from chunk centre before regenerating
+const VOX = 0.046;                      // one 787 voxel, in blocks (the 787 is ~5.5 blocks long)
+// Route, from the aircraft's own feed via /api/route. ORIG/DEST are [lon, lat].
+let ORIG = [0, 0], DEST = [0, 0], ROUTE = { origin: {}, dest: {} };
+const AIRLINE_NAMES = { CHH: "Hainan Airlines", CCA: "Air China", CES: "China Eastern", CSN: "China Southern", CXA: "XiamenAir",
+  BAW: "British Airways", VIR: "Virgin Atlantic", DLH: "Lufthansa", AFR: "Air France", KLM: "KLM", FIN: "Finnair", CPA: "Cathay Pacific" };
+const airlineName = () => AIRLINE_NAMES[(ROUTE.callsign || "").slice(0, 3)] || "";
+const typeName = () => /^B787-9/.test(ROUTE.type || "") ? "Boeing 787-9 Dreamliner" : ROUTE.type || "";
+const R_KM = 6371.0088, KT_KMH = 1.852;
+const D2R = Math.PI / 180;
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ============================================================
+// Tile cache: local imagery (Esri) and elevation (Terrarium) tiles,
+// pre-fetched for the route corridor before the satellite blackout.
+// ============================================================
+const tiles = new Map();
+function loadTile(kind, z, x, y) {
+  const key = `${kind}/${z}/${x}/${y}`;
+  if (tiles.has(key)) return tiles.get(key).promise;
+  const entry = { state: "loading", data: null };
+  entry.promise = new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = c.height = 256;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      entry.data = ctx.getImageData(0, 0, 256, 256).data;
+      entry.state = "ok"; resolve(entry);
+    };
+    const src = `tex/${kind}/${z}/${x}/${y}.${kind === "sat" ? "jpg" : "png"}`;
+    let tries = 0;
+    // One retry: a 404 means the tile wasn't fetched before the blackout, but a reset is just a busy server.
+    img.onerror = () => { if (tries++ < 1) setTimeout(() => (img.src = src + "?r=1"), 400); else { entry.state = "missing"; resolve(entry); } };
+    img.src = src;
+  });
+  tiles.set(key, entry);
+  return entry.promise;
+}
+
+function tileXY(lat, lon, z) {
+  const n = 2 ** z, r = lat * D2R;
+  return [((lon + 180) / 360) * n, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n];
+}
+function sampleTile(kind, z, lat, lon) {
+  const [fx, fy] = tileXY(lat, lon, z);
+  const x = Math.floor(fx), y = Math.floor(fy);
+  const e = tiles.get(`${kind}/${z}/${((x % 2 ** z) + 2 ** z) % 2 ** z}/${y}`);
+  if (!e || e.state !== "ok") return null;
+  const px = Math.min(255, Math.floor((fx - x) * 256)), py = Math.min(255, Math.floor((fy - y) * 256));
+  const i = (py * 256 + px) * 4;
+  return [e.data[i], e.data[i + 1], e.data[i + 2]];
+}
+
+// Global fallbacks for anywhere outside the corridor.
+const globals = {};
+async function loadGlobal(name, src) {
+  // A load event, not img.decode(): decode() never settles while the document is hidden.
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error("couldn't load " + src)); img.src = src; });
+  const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true }); ctx.drawImage(img, 0, 0);
+  globals[name] = { w: img.width, h: img.height, data: ctx.getImageData(0, 0, img.width, img.height).data, img };
+}
+function sampleGlobal(name, lat, lon) {
+  const g = globals[name];
+  const x = clamp(Math.floor(((lon + 180) / 360) * g.w), 0, g.w - 1), y = clamp(Math.floor(((90 - lat) / 180) * g.h), 0, g.h - 1);
+  const i = (y * g.w + x) * 4; return [g.data[i], g.data[i + 1], g.data[i + 2]];
+}
+
+function elevation(lat, lon, zs = ZOOMS[2].dem) {
+  for (const z of zs) {
+    const p = sampleTile("dem", z, lat, lon);
+    if (p) return p[0] * 256 + p[1] + p[2] / 256 - 32768;
+  }
+  if (sampleGlobal("water", lat, lon)[0] > 128) return 0;
+  return sampleGlobal("topo", lat, lon)[0] * 24;
+}
+function surfaceColor(lat, lon, zs = ZOOMS[2].sat) {
+  for (const z of zs) { const p = sampleTile("sat", z, lat, lon); if (p) return p; }
+  return sampleGlobal("marble", lat, lon);
+}
+
+// ============================================================
+// Block palette. Satellite colour picks the material, then a little of
+// the real colour is mixed back in so regions keep their character.
+// ============================================================
+const PALETTE = {
+  grass:  [0x6f, 0xa8, 0x3f], forest: [0x3c, 0x6a, 0x2a], sand: [0xdb, 0xcf, 0x9a],
+  snow:   [0xf2, 0xf6, 0xfa], stone:  [0x82, 0x82, 0x82], dirt: [0x86, 0x62, 0x3f],
+  water:  [0x3f, 0x76, 0xe4], steppe: [0xa8, 0xa0, 0x5c],
+};
+const BIOME = { grass: "plains", forest: "taiga", sand: "desert", snow: "snowy peaks", stone: "stony peaks", dirt: "badlands", water: "river", steppe: "savanna" };
+function classify([r, g, b], elev) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, s = mx - mn;
+  if (elev <= 1 && b >= r) return "water";
+  if (b > r + 14 && b >= g - 6 && l < 150) return "water";
+  if (l > 200 && s < 32) return "snow";
+  if (elev > 2800 && l > 150 && s < 45) return "snow";
+  if (g >= r && g >= b - 4) return l < 72 ? "forest" : "grass";
+  if (r > g && g > b && l > 150 && s > 30) return "sand";
+  if (r > g && g > b && s > 22) return l < 110 ? "dirt" : "steppe";
+  return l > 125 ? "stone" : "dirt";
+}
+function blockRGB(kind, real) {
+  const p = PALETTE[kind];
+  const k = kind === "water" || kind === "snow" ? 0.15 : 0.3;
+  return [(p[0] * (1 - k) + real[0] * k) / 255, (p[1] * (1 - k) + real[1] * k) / 255, (p[2] * (1 - k) + real[2] * k) / 255];
+}
+
+// ============================================================
+// Small deterministic noise for trees and clouds.
+// ============================================================
+function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, s = (t) => t * t * (3 - 2 * t);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  const u = s(xf), v = s(yf);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+// ============================================================
+// Pixel textures, generated at 16x16 like a resource pack.
+// ============================================================
+function pixelTexture(fn) {
+  const c = document.createElement("canvas"); c.width = c.height = 16;
+  const ctx = c.getContext("2d"), img = ctx.createImageData(16, 16);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const [r, g, b, a = 255] = fn(x, y), i = (y * 16 + x) * 4;
+    img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = a;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const rnd = (x, y, s) => hash2(x * 31 + s * 7, y * 17 + s * 13);
+const px = ([r, g, b], x, y, s, amt) => { const v = 1 + (rnd(x, y, s) - 0.5) * amt; return [r, g, b].map((c) => clamp(Math.round(c * v), 0, 255)); };
+const DIRT = [134, 96, 67], SNOW = [243, 248, 250];
+// A tiny resource pack. Grass tops, water and leaves are grey so the biome colour
+// (from satellite imagery) can tint them, the way Minecraft tints grass by biome.
+const TEX = {
+  grassTop:  pixelTexture((x, y) => { const v = 165 + rnd(x, y, 1) * 75; return [v, v, v]; }),
+  grassSide: pixelTexture((x, y) => y < 3 + Math.round(rnd(x, 0, 2) * 2) ? px([104, 160, 62], x, y, 3, 0.3) : px(rnd(x, y, 22) < 0.1 ? [100, 72, 50] : DIRT, x, y, 4, 0.3)),
+  dirt:      pixelTexture((x, y) => px(rnd(x, y, 5) < 0.14 ? [98, 70, 48] : DIRT, x, y, 6, 0.3)),
+  stone:     pixelTexture((x, y) => px(rnd(x, y, 7) < 0.16 ? [102, 102, 102] : [128, 128, 128], x, y, 8, 0.2)),
+  sand:      pixelTexture((x, y) => px([219, 207, 163], x, y, 9, 0.12)),
+  gravel:    pixelTexture((x, y) => px([[136, 126, 126], [108, 102, 102], [162, 154, 152]][Math.floor(rnd(x, y, 10) * 3)], x, y, 11, 0.12)),
+  snow:      pixelTexture((x, y) => px(SNOW, x, y, 12, 0.05)),
+  snowSide:  pixelTexture((x, y) => y < 4 + Math.round(rnd(x, 0, 13) * 2) ? px(SNOW, x, y, 14, 0.05) : px(DIRT, x, y, 15, 0.3)),
+  water:     pixelTexture((x, y) => { const v = Math.sin((x + y * 0.6) * 0.8 + rnd(0, y, 16) * 3) > 0.55 ? 240 : 180 + rnd(x, y, 17) * 30; return [v, v, v, 210]; }),
+  spruceLog: pixelTexture((x, y) => px(x % 4 === 0 ? [45, 30, 15] : [66, 45, 22], x, y, 18, 0.2)),
+  oakLog:    pixelTexture((x, y) => px(x % 4 === 0 ? [80, 62, 38] : [108, 85, 51], x, y, 19, 0.2)),
+  leaves:    pixelTexture((x, y) => { if (rnd(x, y, 20) < 0.22) return [0, 0, 0, 0]; const v = 120 + rnd(x, y, 21) * 115; return [v, v, v]; }),
+};
+TEX.water.wrapS = TEX.water.wrapT = THREE.RepeatWrapping;
+
+// ============================================================
+// Renderer, scenes, cameras.
+// ============================================================
+const canvas = $("gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, logarithmicDepthBuffer: true });
+renderer.setPixelRatio(window.__recording ? 1 : Math.min(devicePixelRatio, 2));   // __recording: set by the screen recorder
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const world = new THREE.Scene();
+const globe = new THREE.Scene();
+const chaseCam = new THREE.PerspectiveCamera(60, 1, 0.05, 900);
+const cockpitCam = new THREE.PerspectiveCamera(70, 1, 0.02, 900);
+const globeCam = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+
+const chaseCtl = new OrbitControls(chaseCam, canvas);
+chaseCtl.enableDamping = true; chaseCtl.dampingFactor = 0.08;
+chaseCtl.minDistance = 2.5; chaseCtl.maxDistance = 160; chaseCtl.maxPolarAngle = Math.PI * 0.495;
+chaseCtl.enablePan = false;
+
+const globeCtl = new OrbitControls(globeCam, canvas);
+globeCtl.enableDamping = true; globeCtl.dampingFactor = 0.07; globeCtl.rotateSpeed = 0.45;
+globeCtl.minDistance = 104; globeCtl.maxDistance = 700; globeCtl.enablePan = false;
+globeCtl.enabled = false;
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  for (const c of [chaseCam, cockpitCam, globeCam]) { c.aspect = w / h; c.updateProjectionMatrix(); }
+  buildHud();
+}
+addEventListener("resize", resize);
+
+// ---------- world lighting & sky ----------
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x5a4a3a, 0.9);
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+world.add(sun, hemi, ambient, sun.target);
+world.fog = new THREE.Fog(0x9fc4ff, 45, 124);   // ends just inside the chunk edge
+const skyU = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, glow: { value: new THREE.Color(0xffa860) } };
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(800, 32, 16), new THREE.ShaderMaterial({
+  uniforms: skyU, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+  vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 glow; varying vec3 vDir;
+    void main() {
+      float h = vDir.y;
+      vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.5)) : horizon * 0.8;
+      float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+      c += glow * (pow(s, 10.0) * 0.35 + pow(s, 120.0) * 0.6);
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+    }`,
+}));
+skyDome.renderOrder = -1; skyDome.frustumCulled = false; world.add(skyDome);
+const sunSquare = new THREE.Mesh(new THREE.PlaneGeometry(46, 46), new THREE.MeshBasicMaterial({ color: 0xfff4c0, fog: false }));
+sunSquare.renderOrder = -1; world.add(sunSquare);
+
+// ============================================================
+// Chunk: local tangent plane around (lat0, lon0), x = east, z = south.
+// ============================================================
+let chunk = null;   // { lat0, lon0, cosl, heights, kinds, meshes: [] }
+const chunkGroup = new THREE.Group(); world.add(chunkGroup);
+const cloudGroup = new THREE.Group(); world.add(cloudGroup);
+
+function toLocal(lat, lon) {
+  return [((lon - chunk.lon0) * 111.32 * chunk.cosl) / chunk.b, (-(lat - chunk.lat0) * 110.574) / chunk.b];
+}
+function blockLatLon(i, j, c) {
+  const half = CHUNK / 2;
+  return [c.lat0 - ((j - half + 0.5) * c.b) / 110.574, c.lon0 + ((i - half + 0.5) * c.b) / (111.32 * c.cosl)];
+}
+
+let manifest = null;   // { dem: Set, sat: Set } of "z/x/y" present on disk
+async function ensureTiles(lat0, lon0, b, onProgress) {
+  const spanLat = (CHUNK * b) / 110.574 / 2 + 0.2, spanLon = (CHUNK * b) / (111.32 * Math.cos(lat0 * D2R)) / 2 + 0.3;
+  const jobs = [];
+  for (const [kind, zs] of [["dem", ZOOMS[b].dem], ["sat", ZOOMS[b].sat]]) {
+    for (const z of zs) {
+      const [x0, y0] = tileXY(lat0 + spanLat, lon0 - spanLon, z), [x1, y1] = tileXY(lat0 - spanLat, lon0 + spanLon, z);
+      for (let x = Math.floor(x0); x <= Math.floor(x1); x++)
+        for (let y = Math.floor(y0); y <= Math.floor(y1); y++) {
+          const xx = ((x % 2 ** z) + 2 ** z) % 2 ** z;
+          if (!manifest || manifest[kind].has(`${z}/${xx}/${y}`)) jobs.push([kind, z, xx, y]);
+        }
+    }
+  }
+  let done = 0;
+  await Promise.all(jobs.map((j) => loadTile(...j).then(() => onProgress?.(++done / jobs.length))));
+}
+
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+// Minecraft lights faces by direction, not by the sun: top 100%, north/south 80%,
+// east/west 60%, bottom 50%. Bake that into the cube's vertex colours.
+const blockGeo = (() => {
+  const g = new THREE.BoxGeometry(1, 1, 1), shade = [0.6, 0.6, 1, 0.5, 0.8, 0.8], col = [];
+  for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) col.push(shade[f], shade[f], shade[f]);
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  return g;
+})();
+const blockMaterials = [];   // brightened and dimmed together with the time of day
+function bmat(map, { tint = true, transparent = false, opacity = 1, alphaTest = 0 } = {}) {
+  const m = new THREE.MeshBasicMaterial({ map, vertexColors: true, transparent, opacity, alphaTest, depthWrite: !transparent || alphaTest > 0,
+                                          side: alphaTest ? THREE.DoubleSide : THREE.FrontSide });
+  if (!tint) {   // grass sides, logs, snow: keep their own colours, ignore the per-block biome tint
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace("#include <color_vertex>", `
+        #if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+          vColor = vec3( 1.0 );
+        #endif
+        #ifdef USE_COLOR
+          vColor *= color;
+        #endif`);
+    };
+    m.customProgramCacheKey = () => "no-instance-tint";
+  }
+  blockMaterials.push(m);
+  return m;
+}
+const MAT = (() => {
+  const grassSide = bmat(TEX.grassSide, { tint: false }), dirtRaw = bmat(TEX.dirt, { tint: false }), snowSide = bmat(TEX.snowSide, { tint: false });
+  return {
+    grass: [grassSide, grassSide, bmat(TEX.grassTop), dirtRaw, grassSide, grassSide],
+    snow: [snowSide, snowSide, bmat(TEX.snow, { tint: false }), dirtRaw, snowSide, snowSide],
+    dirt: bmat(TEX.dirt), stone: bmat(TEX.stone), sand: bmat(TEX.sand), gravel: bmat(TEX.gravel),
+    water: bmat(TEX.water, { transparent: true, opacity: 0.82 }),
+    spruceLog: bmat(TEX.spruceLog, { tint: false }), oakLog: bmat(TEX.oakLog, { tint: false }),
+    leaves: bmat(TEX.leaves, { alphaTest: 0.5 }),
+    cloud: (() => { const m = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false }); blockMaterials.push(m); return m; })(),
+  };
+})();
+
+function instanced(geo, mat, list, withColor = true) {
+  const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length));
+  const mx = new THREE.Matrix4(), col = new THREE.Color();
+  list.forEach((b, k) => {
+    mx.makeScale(b[3], b[4], b[5]).setPosition(b[0], b[1], b[2]);
+    m.setMatrixAt(k, mx);
+    if (withColor) m.setColorAt(k, col.setRGB(b[6], b[7], b[8], THREE.SRGBColorSpace));
+  });
+  m.count = list.length;
+  m.instanceMatrix.needsUpdate = true;
+  if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  return m;
+}
+
+async function buildChunk(lat0, lon0, b, onProgress) {
+  await ensureTiles(lat0, lon0, b, onProgress);
+  const c = { lat0, lon0, b, vm: (b * 1000) / EXAG, cosl: Math.cos(lat0 * D2R) };
+  const cloudY = Math.round(4500 / c.vm), zs = ZOOMS[b];
+  const N = CHUNK, half = N / 2;
+  const H = new Int16Array(N * N), K = new Array(N * N), RGB = new Array(N * N), E = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const [lat, lon] = blockLatLon(i, j, c);
+    const elev = elevation(lat, lon, zs.dem), real = surfaceColor(lat, lon, zs.sat);
+    const kind = classify(real, elev);
+    const k = j * N + i;
+    E[k] = elev; K[k] = kind; RGB[k] = blockRGB(kind, real);
+    H[k] = Math.max(1, Math.round(Math.max(0, elev) / c.vm) + 1);
+  }
+  const L = { grass: [], snow: [], dirt: [], stone: [], sand: [], gravel: [], water: [], spruceLog: [], oakLog: [], leaves: [] };
+  const grey = (i, j) => { const g = 0.9 + hash2(i * 5, j * 9) * 0.14; return [g, g, g]; };
+  const tintTop = (rgb, k = 1.25) => rgb.map((v) => Math.min(1, v * k));
+  const SPRUCE = [0.36, 0.56, 0.36], OAK = [0.45, 0.72, 0.28];
+  let trees = 0;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, h = H[k], kind = K[k];
+    const x = i - half + 0.5, z = j - half + 0.5;
+    const nmin = Math.min(i > 0 ? H[k - 1] : 0, i < N - 1 ? H[k + 1] : 0, j > 0 ? H[k - N] : 0, j < N - 1 ? H[k + N] : 0);
+    if (kind === "water") {
+      L.water.push([x, h - 0.56, z, 1, 0.88, 1, ...tintTop(RGB[k], 1.15)]);
+      L.sand.push([x, h - 1.5, z, 1, 1, 1, ...grey(i, j)]);
+      continue;
+    }
+    // Top block by biome, then what lies under it: three layers of dirt or sand, then stone.
+    const top = kind === "grass" || kind === "forest" || kind === "steppe" ? "grass" : kind === "snow" ? "snow" : kind === "sand" ? "sand" : kind === "stone" ? "stone" : "dirt";
+    const under = top === "sand" ? "sand" : top === "stone" || top === "snow" ? "stone" : "dirt";
+    const from = Math.max(0, Math.min(h - 1, nmin));
+    for (let y = from; y < h; y++) {
+      const depth = h - 1 - y;
+      const type = depth === 0 ? top : depth <= 3 ? under : "stone";
+      const tint = type === "grass" ? tintTop(RGB[k], kind === "forest" ? 1.35 : 1.2) : grey(i + y, j);
+      L[type].push([x, y + 0.5, z, 1, 1, 1, ...tint]);
+    }
+    // Trees: spruce in the taiga, the odd oak on plains and savanna. Sized as trees, not 2 km giants.
+    const r = hash2(i + Math.round(lon0 * 50), j + Math.round(lat0 * 50));
+    const ox = (hash2(i, j * 3) - 0.5) * 0.4, oz = (hash2(i * 3, j) - 0.5) * 0.4, tx = x + ox, tz = z + oz;
+    if (kind === "forest" && r < 0.42) {
+      trees++;
+      const tint = SPRUCE.map((v, n) => v * 0.7 + RGB[k][n] * 0.45);
+      L.spruceLog.push([tx, h + 0.3, tz, 0.13, 0.6, 0.13, 1, 1, 1]);
+      [[0.42, 0.66], [0.64, 0.48], [0.86, 0.3]].forEach(([dy, w]) => L.leaves.push([tx, h + dy, tz, w, 0.22, w, ...tint]));
+      L.leaves.push([tx, h + 1.02, tz, 0.13, 0.13, 0.13, ...tint]);
+    } else if ((kind === "grass" && r < 0.06) || (kind === "steppe" && r < 0.02)) {
+      trees++;
+      const tint = OAK.map((v, n) => v * 0.75 + RGB[k][n] * 0.35);
+      L.oakLog.push([tx, h + 0.25, tz, 0.13, 0.5, 0.13, 1, 1, 1]);
+      L.leaves.push([tx, h + 0.62, tz, 0.62, 0.4, 0.62, ...tint], [tx, h + 0.9, tz, 0.36, 0.18, 0.36, ...tint]);
+    }
+  }
+
+  // Clouds: thin, translucent and sparse, like the game's. C toggles them.
+  const clouds = [];
+  for (let j = 0; j < N; j += 4) for (let i = 0; i < N; i += 4) {
+    const [lat, lon] = blockLatLon(i + 2, j + 2, c);
+    const n = vnoise(lon * 2.2, lat * 3.4) * 0.65 + vnoise(lon * 7.1, lat * 9.3) * 0.35;
+    if (n > 0.79 && cloudY < 400) clouds.push([i - half + 2, cloudY + 0.5, j - half + 2, 4, 0.35, 4]);
+  }
+
+  // Swap in the new chunk.
+  for (const m of [...chunkGroup.children, ...cloudGroup.children]) m.dispose?.();
+  chunkGroup.clear(); cloudGroup.clear(); cloudGroup.position.set(0, 0, 0);
+  for (const [type, list] of Object.entries(L)) if (list.length) chunkGroup.add(instanced(blockGeo, MAT[type], list));
+  cloudGroup.add(instanced(blockGeo, MAT.cloud, clouds, false));
+  c.H = H; c.K = K; c.E = E;
+  const prev = chunk;
+  chunk = c;
+  stats.blocks = Object.entries(L).filter(([t]) => !/Log|leaves/.test(t)).reduce((a, [, l]) => a + l.length, 0); stats.trees = trees;
+  return prev;
+}
+
+function groundAt(x, z) {
+  const i = Math.floor(x + CHUNK / 2), j = Math.floor(z + CHUNK / 2);
+  if (!chunk || i < 0 || j < 0 || i >= CHUNK || j >= CHUNK) return null;
+  const k = j * CHUNK + i;
+  return { h: chunk.H[k], kind: chunk.K[k], elev: chunk.E[k] };
+}
+
+// ============================================================
+// The aircraft: B-1135, a Boeing 787-9 in Hainan livery, in voxels.
+// One voxel is ~0.52 m: 120 long (62.8 m), 114 span (60.1 m).
+// Nose +x, up +y, right wing +z.
+// ============================================================
+function build787() {
+  const W = [0.96, 0.965, 0.95], BELLY = [0.82, 0.84, 0.86], RED = [0.80, 0.10, 0.09], GOLD = [0.98, 0.72, 0.16];
+  const WIN = [0.12, 0.15, 0.21], DOOR = [0.74, 0.76, 0.78], WING = [0.76, 0.78, 0.80], FLAP = [0.62, 0.65, 0.68];
+  const DARK = [0.16, 0.17, 0.19], ENG = [0.93, 0.94, 0.95], METAL = [0.58, 0.60, 0.62];
+  const vox = new Map();
+  const put = (x, y, z, c) => vox.set(`${x},${y},${z}`, [x, y, z, c]);
+  const R = 5.7;
+
+  // Fuselage profile: top, bottom and half-width at each station.
+  // The nose drops from the top (windscreen slope); the tail sweeps up from below.
+  function prof(x) {
+    let top = R, bot = -R, w = R;
+    if (x > 40) top = R * Math.sqrt(Math.max(0, 1 - ((x - 40) / 21) ** 2));
+    if (x > 47) bot = -R * Math.sqrt(Math.max(0, 1 - ((x - 47) / 14) ** 2));
+    if (x > 43) w = R * Math.sqrt(Math.max(0, 1 - ((x - 43) / 18) ** 2));
+    if (x < -24) { const t = (-24 - x) / 36; bot = -R + (R + 2.6) * t ** 1.35; w = R * (1 - 0.8 * t ** 1.25); }
+    if (x < -42) { const t = (-42 - x) / 18; top = R - (R - 3.9) * t ** 1.4; }
+    return { top, bot, w: Math.max(w, 0.8), cy: (top + bot) / 2, ry: Math.max((top - bot) / 2, 0.8) };
+  }
+
+  for (let x = -60; x <= 60; x++) {
+    const p = prof(x);
+    for (let y = Math.floor(p.bot) - 1; y <= Math.ceil(p.top) + 1; y++) for (let z = -Math.ceil(p.w) - 1; z <= Math.ceil(p.w) + 1; z++) {
+      const d = Math.hypot((y - p.cy) / p.ry, z / p.w);
+      if (d > 1.02 || d < 1 - 1.45 / Math.min(p.ry, p.w)) continue;
+      const yr = (y - p.cy) / p.ry;
+      let c = yr < -0.55 ? BELLY : W;
+      // The Hainan ribbon: a thin red line under the forward cabin, with gold above it,
+      // rising and widening until the whole aft fuselage is red.
+      if (x < 34) {
+        const s = clamp((34 - x) / 92, 0, 1);
+        const yb = -0.62 + 1.42 * s ** 1.7;          // top of red, as a fraction of the half-height
+        const thick = 0.16 + 2.2 * s ** 2.2;
+        if (yr < yb && yr > yb - thick) c = RED;
+        else if (yr >= yb && yr < yb + 0.13 + 0.12 * s) c = GOLD;
+      }
+      if (x < -44 && yr > 0.35) c = RED;             // fin root blends into the red tail
+      // Doors (outlined in light grey) and the window belt.
+      const door = [44, 26, -2, -30].some((dx) => x === dx || x === dx - 3) && yr > -0.45 && yr < 0.62 && Math.abs(z) >= p.w - 1.4;
+      if (door) c = DOOR;
+      else if (x > -40 && x < 42 && x % 2 === 0 && Math.round(y - p.cy) === 2 && Math.abs(z) >= p.w - 1.4) c = WIN;
+      // Four-pane windscreen on the sloping nose.
+      if (x >= 46 && x <= 51 && y >= Math.floor(p.top) - 1 && y <= Math.ceil(p.top) && Math.abs(z) >= 1 && Math.abs(z) <= 4) c = WIN;
+      // Small Hainan logo, a red disc with a gold centre, behind the windscreen.
+      const lx = x - 38, ly = y - 3;
+      if (Math.abs(z) >= p.w - 1.4 && lx * lx + ly * ly <= 2.3) c = lx * lx + ly * ly <= 0.6 ? GOLD : RED;
+      put(x, y, z, c);
+    }
+  }
+  // APU exhaust in the tail cone.
+  put(-61, 3, 0, DARK); put(-61, 4, 0, METAL);
+  // Wing-to-body fairing: the 787's long belly bulge.
+  for (let x = -18; x <= 14; x++) for (let z = -4; z <= 4; z++) put(x, Math.floor(prof(x).bot) - 1, z, BELLY);
+
+  // Wings: low, swept 32 degrees, with the big upward flex and raked tips.
+  const wingY = (az) => -3.2 + (az - 5) * 0.085 + ((az - 5) / 52) ** 2 * 4.2;
+  for (const side of [-1, 1]) {
+    for (let az = 5; az <= 57; az++) {
+      let le = 9 - (az - 5) * 0.66;
+      let te = az < 20 ? -14 - (az - 5) * 0.25 : -17.75 - (az - 20) * 0.34;   // straight inboard trailing edge (Yehudi)
+      if (az > 50) { le -= (az - 50) * 0.9; te -= (az - 50) * 0.35; }        // raked tip
+      const y = Math.round(wingY(az)), thick = az < 18 ? 2 : 1;
+      for (let x = Math.round(te); x <= Math.round(le); x++) {
+        const c = x >= Math.round(le) - 1 ? W : x <= Math.round(te) + Math.max(1, Math.round((le - te) * 0.24)) ? FLAP : WING;
+        for (let k = 0; k < thick; k++) put(x, y - k, side * az, c);
+      }
+      // Flap-track fairings: the canoes under the trailing edge.
+      if ([13, 24, 34, 44].includes(az)) for (let x = Math.round(te) - 3; x <= Math.round(te) + 5; x++) put(x, y - thick, side * az, FLAP);
+    }
+
+    // GEnx-1B: well forward of the wing, hung low, with chevrons at the exhaust.
+    const ez = side * 19, ey = -9;
+    for (let x = -3; x <= 21; x++) {
+      const nacelle = x >= 6;
+      const r = nacelle ? (x > 18 ? 4.3 : 4.4 - (19 - Math.min(x, 19)) * 0.04) : 2.9 - (6 - x) * 0.22;
+      for (let dy = -5; dy <= 5; dy++) for (let dz = -5; dz <= 5; dz++) {
+        const d = Math.hypot(dy, dz);
+        if (d > r + 0.2) continue;
+        let c = null;
+        if (x === 21) c = d > r - 1 ? METAL : null;                              // intake lip
+        else if (x === 20) c = d > r - 1 ? ENG : d < 1.3 ? METAL : DARK;          // fan face and spinner
+        else if (d > r - 1.2) c = nacelle ? ENG : x <= -2 ? DARK : METAL;          // cowl, core, plug
+        if (x === 6 && d > r - 1.2 && (Math.round(Math.atan2(dy, dz) * 4) % 2 === 0)) put(5, ey + dy, ez + dz, ENG); // chevrons
+        if (c) put(x, ey + dy, ez + dz, c);
+      }
+    }
+    for (let x = 4; x <= 15; x++) for (let y = ey + 4; y <= Math.round(wingY(19)) - 1; y++) put(x, y, ez, METAL);   // pylon
+
+    // Horizontal stabiliser.
+    for (let az = 2; az <= 19; az++) {
+      const le = -45 - (az - 2) * 0.78, chord = 12 - (az - 2) * 0.42, y = Math.round(2 + az * 0.12);
+      for (let x = Math.round(le - chord); x <= Math.round(le); x++) put(x, y, side * az, x >= Math.round(le) - 1 ? W : WING);
+    }
+  }
+
+  // Fin: red, swept, with Hainan's gold Peng-bird swirl.
+  for (let y = 5; y <= 22; y++) {
+    const le = -37 - (y - 5) * 0.86, chord = 19 - (y - 5) * 0.6;
+    for (let x = Math.round(le - chord); x <= Math.round(le); x++) {
+      const d = Math.hypot(x + 50, (y - 14.5) * 1.1), a = Math.atan2(y - 14.5, x + 50);
+      const ring = (d > 2.2 && d < 3.3) || (d > 4.8 && d < 5.9 && a > -1.9 && a < 2.6);
+      const tail = Math.abs(y - (9 - (x + 50) * 0.35)) < 0.7 && x > -51 && x < -44;
+      for (const z of y < 8 ? [-1, 0, 1] : [0]) put(x, y, z, ring || tail ? GOLD : RED);
+    }
+  }
+
+  const list = [...vox.values()];
+  const mesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ emissive: 0x2a2a2a }), list.length);
+  const mx = new THREE.Matrix4(), col = new THREE.Color();
+  list.forEach(([x, y, z, c], k) => { mesh.setMatrixAt(k, mx.makeTranslation(x, y, z)); mesh.setColorAt(k, col.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace)); });
+  const g = new THREE.Group(); g.add(mesh);
+  g.userData.voxels = list.length;
+
+  // Navigation lights, strobes, beacons.
+  const tipY = Math.round(wingY(57));
+  const light = (x, y, z, color, s = 1.6) => {
+    const m = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color })); m.position.set(x, y, z); m.scale.setScalar(s); g.add(m); return m;
+  };
+  g.userData.nav = [light(-30, tipY, -58, 0xff2020), light(-30, tipY, 58, 0x20ff40), light(-62, 4, 0, 0xffffff)];
+  g.userData.strobes = [light(-31, tipY + 1, -58, 0xffffff, 2), light(-31, tipY + 1, 58, 0xffffff, 2)];
+  g.userData.beacons = [light(0, 7, 0, 0xff3030), light(0, -8, 0, 0xff3030)];
+  // Exhaust points (just behind the plug) and the nozzle glow.
+  g.userData.engines = [new THREE.Vector3(-4, -9, -19), new THREE.Vector3(-4, -9, 19)];
+  g.userData.cockpit = new THREE.Vector3(49, 4.2, 0);
+  return g;
+}
+
+const plane = build787();
+plane.scale.setScalar(VOX);
+world.add(plane);
+
+// Contrails: long-lived white cubes that drift back from the engines.
+const TRAIL_MAX = 900;
+const trail = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x666666 }), TRAIL_MAX);
+trail.count = 0; world.add(trail);
+const trailPts = [];
+
+// Engine fumes: puffy Minecraft smoke, hot and grey at the nozzle, pale as it spreads.
+const FUME_MAX = 700;
+const fumes = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x555555, transparent: true, opacity: 0.4, depthWrite: false }), FUME_MAX);
+fumes.count = 0; fumes.frustumCulled = false; world.add(fumes);
+fumes.setColorAt(0, new THREE.Color(1, 1, 1));
+const fumePts = [];
+
+// ============================================================
+// Globe scene
+// ============================================================
+const GR = 100;
+function vec(lat, lon, r = GR) {
+  const phi = (90 - lat) * D2R, th = (lon + 180) * D2R;
+  return new THREE.Vector3(-r * Math.sin(phi) * Math.cos(th), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(th));
+}
+const gSun = new THREE.DirectionalLight(0xffffff, 2.2);
+globe.add(gSun, new THREE.AmbientLight(0x6070a0, 0.55));
+let earth, plane2, routeG = new THREE.Group(), trackG = new THREE.Group();
+globe.add(routeG, trackG);
+
+function buildGlobe(russia) {
+  const marble = new THREE.Texture(globals.marble.img); marble.needsUpdate = true;
+  marble.colorSpace = THREE.SRGBColorSpace; marble.magFilter = THREE.NearestFilter;
+  const topo = new THREE.Texture(globals.topo.img); topo.needsUpdate = true;
+  earth = new THREE.Mesh(new THREE.SphereGeometry(GR, 160, 80),
+    new THREE.MeshPhongMaterial({ map: marble, bumpMap: topo, bumpScale: 1.4, shininess: 6 }));
+  globe.add(earth);
+
+  // Russia, hatched in red, painted onto a transparent shell.
+  const c = document.createElement("canvas"); c.width = 4096; c.height = 2048;
+  const ctx = c.getContext("2d");
+  const proj = d3.geoEquirectangular().scale(4096 / (2 * Math.PI)).translate([2048, 1024]);
+  const path = d3.geoPath(proj, ctx);
+  const pc = document.createElement("canvas"); pc.width = pc.height = 12;
+  const p = pc.getContext("2d"); p.fillStyle = "rgba(210,40,35,0.16)"; p.fillRect(0, 0, 12, 12);
+  p.fillStyle = "rgba(235,45,40,0.7)"; for (let i = 0; i < 12; i++) p.fillRect(i, 11 - i, 2, 2);
+  ctx.fillStyle = ctx.createPattern(pc, "repeat"); ctx.beginPath(); path(russia); ctx.fill();
+  ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 3; ctx.beginPath(); path(russia); ctx.stroke();
+  const zt = new THREE.CanvasTexture(c); zt.colorSpace = THREE.SRGBColorSpace; zt.magFilter = THREE.NearestFilter;
+  globe.add(new THREE.Mesh(new THREE.SphereGeometry(GR + 0.25, 160, 80), new THREE.MeshBasicMaterial({ map: zt, transparent: true, depthWrite: false })));
+
+  // Thin atmosphere and the night sky.
+  globe.add(new THREE.Mesh(new THREE.SphereGeometry(GR * 1.035, 64, 32),
+    new THREE.MeshBasicMaterial({ color: 0x5aa8ff, transparent: true, opacity: 0.13, side: THREE.BackSide })));
+  const sky = new THREE.TextureLoader().load("tex/night-sky.png"); sky.colorSpace = THREE.SRGBColorSpace;
+  globe.add(new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), new THREE.MeshBasicMaterial({ map: sky, side: THREE.BackSide })));
+
+  // Airports as little gold pillars.
+  for (const ll of [ORIG, DEST]) {
+    const m = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffd23f, emissive: 0x553300 }));
+    m.position.copy(vec(ll[1], ll[0], GR + 0.6)); m.scale.set(0.9, 0.9, 0.9); m.lookAt(0, 0, 0); m.scale.z = 2.4; globe.add(m);
+  }
+
+  plane2 = build787(); plane2.scale.setScalar(0.034); globe.add(plane2);
+}
+
+const cubeG = new THREE.BoxGeometry(1, 1, 1);
+function chainCubes(points, color, size, every) {
+  const g = new THREE.Group();
+  const m = new THREE.InstancedMesh(cubeG, new THREE.MeshBasicMaterial({ color }), points.length);
+  const mx = new THREE.Matrix4(), q = new THREE.Quaternion();
+  points.forEach((p, k) => { q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p.clone().normalize()); mx.compose(p, q, new THREE.Vector3(size, size, size)); m.setMatrixAt(k, mx); });
+  g.add(m); return g;
+}
+function rebuildRoute() {
+  if (!fix) return;
+  routeG.clear(); trackG.clear();
+  const interp = d3.geoInterpolate([fix.lon, fix.lat], DEST);
+  const n = 90, ahead = [];
+  for (let i = 1; i <= n; i += 1) if (i % 2) { const [lo, la] = interp(i / n); ahead.push(vec(la, lo, GR + 0.6)); }
+  routeG.add(chainCubes(ahead, 0xe040a0, 0.45));
+  const on = [], off = [];
+  for (let i = 0; i < track.length; i += 6) { const p = track[i]; (p.online === false ? off : on).push(vec(p.lat, p.lon, GR + 0.6)); }
+  // Before tracking started: origin to the first fix.
+  if (track.length) {
+    const back = d3.geoInterpolate(ORIG, [track[0].lon, track[0].lat]);
+    for (let i = 0; i <= 30; i += 2) { const [lo, la] = back(i / 30); on.push(vec(la, lo, GR + 0.6)); }
+  }
+  trackG.add(chainCubes(on, 0xb0207a, 0.6), chainCubes(off, 0xff3b30, 0.6));
+}
+
+// ============================================================
+// Live data: dead-reckon between 3 s fixes for smooth motion.
+// ============================================================
+let fix = null, server = null, track = [], lastT = 0;
+const stats = { blocks: 0, trees: 0 };
+let russia = null, wasInZone = null, wasOnline = null, toldZone = false;
+
+function destination([lon, lat], brg, dKm) {
+  const d = dKm / R_KM, b = brg * D2R, f1 = lat * D2R, l1 = lon * D2R;
+  const f2 = Math.asin(Math.sin(f1) * Math.cos(d) + Math.cos(f1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(f1), Math.cos(d) - Math.sin(f1) * Math.sin(f2));
+  return [l2 / D2R, f2 / D2R];
+}
+function now() {
+  if (!fix) return null;
+  // Test hook: __pos = [lat, lon] (with __alt, __hdg) previews somewhere else, e.g. the final approach.
+  if (window.__pos) return { lat: window.__pos[0], lon: window.__pos[1], alt: window.__alt ?? fix.alt, gs: fix.gs, hdg: window.__hdg ?? fix.hdg };
+  const dt = (performance.now() - fix.at) / 1000;
+  const [lon, lat] = destination([fix.lon, fix.lat], fix.hdg, ((fix.gs * KT_KMH) / 3600) * Math.min(dt, 30));
+  return { lat, lon, alt: window.__alt ?? fix.alt, gs: fix.gs, hdg: fix.hdg };   // __alt: test hook to preview the descent
+}
+
+async function poll() {
+  try {
+    const [st, pts] = await Promise.all([fetch("/api/state").then((r) => r.json()), fetch(`/api/track?since=${lastT}`).then((r) => r.json())]);
+    server = st;
+    if (pts.length) { track.push(...pts); lastT = track.at(-1).t; }
+    const f = st.flight;
+    if (f?.current_coordinates?.latitude != null) {
+      const c = f.current_coordinates;
+      if (!fix || fix.lat !== c.latitude || fix.lon !== c.longitude)
+        fix = { lat: c.latitude, lon: c.longitude, alt: f.altitude_feet * 0.3048, altFt: f.altitude_feet, gs: f.ground_speed_knots, hdg: f.true_heading_degree, at: performance.now(), raw: f };
+    }
+    checkEvents();
+  } catch { /* server unreachable: keep dead-reckoning */ }
+}
+
+function checkEvents() {
+  if (!fix || !russia) return;
+  const inZone = d3.geoContains(russia, [fix.lon, fix.lat]);
+  const online = server?.online;
+  if (wasInZone === null) {
+    if (inZone) toast(online === false ? "bad" : "", inZone && online === false ? "It's so over." : "Advancement Made!",
+      online === false ? "Over Russia, satellite down" : "Enter the Blackout (still online, somehow)");
+  } else {
+    if (inZone && !wasInZone) toast("bad", "Advancement Made!", "Enter the Blackout");
+    if (!inZone && wasInZone) toast("good", "Advancement Made!", "Leave Russian airspace");
+  }
+  if (wasOnline === true && online === false) toast("bad", "It's so over.", "SATCOM lost over " + (inZone ? "Russia" : "nowhere in particular"));
+  if (wasOnline === false && online === true) { toast("good", "We're so back.", "Satellite link restored"); ding(); }
+  wasInZone = inZone; wasOnline = online;
+}
+
+// ---------- toasts & sound ----------
+function toast(kind, title, text) {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.innerHTML = `<div class="icon" style="background-image:url(../photos/b1135-cutout.png)"></div><div><b></b><span></span></div>`;
+  el.querySelector("b").textContent = title; el.querySelector("span").textContent = text;
+  $("toasts").append(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 500); }, 6000);
+}
+let audio = null;
+addEventListener("pointerdown", () => { audio ??= new AudioContext(); }, { once: true });
+function ding() {
+  if (!audio) return;
+  [0, 0.09, 0.18].forEach((t, k) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "square"; o.frequency.value = [523.25, 659.25, 1046.5][k];
+    g.gain.setValueAtTime(0.06, audio.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + t + 0.25);
+    o.connect(g).connect(audio.destination); o.start(audio.currentTime + t); o.stop(audio.currentTime + t + 0.3);
+  });
+}
+
+// ============================================================
+// Sun: position from date and place; drives sky colour and light.
+// ============================================================
+function sunAt(date, lat, lon) {
+  const doy = (Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - Date.UTC(date.getUTCFullYear(), 0, 0)) / 864e5;
+  const decl = -23.44 * Math.cos(((2 * Math.PI) / 365) * (doy + 10)) * D2R;
+  const hours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  const H = ((hours + lon / 15 - 12) * 15) * D2R, f = lat * D2R;
+  const el = Math.asin(Math.sin(f) * Math.sin(decl) + Math.cos(f) * Math.cos(decl) * Math.cos(H));
+  const az = Math.atan2(-Math.sin(H), Math.tan(decl) * Math.cos(f) - Math.sin(f) * Math.cos(H));
+  return { el, az, decl, subLon: -(hours - 12) * 15 };
+}
+const C = (h) => new THREE.Color(h);
+const SKY = { night: C(0x0b1030), dusk: C(0x6d6fb0), day: C(0x79a6ff) }, HORIZON = { night: C(0x141a3a), dusk: C(0xf09a62), day: C(0xb8d4ff) };
+function mix3(set, e) {
+  const d = e / D2R;
+  if (d <= -8) return set.night.clone();
+  if (d < 4) return set.night.clone().lerp(set.dusk, (d + 8) / 12);
+  if (d < 14) return set.dusk.clone().lerp(set.day, (d - 4) / 10);
+  return set.day.clone();
+}
+
+// ============================================================
+// Modes & input
+// ============================================================
+let mode = "chase";
+let look = { yaw: 0, pitch: -4 };
+function setMode(m) {
+  if (m === "cinema") { startCinema(); return; }
+  if (cine) endCinema();
+  mode = m;
+  document.querySelectorAll(".modes button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.mode === m));
+  chaseCtl.enabled = m === "chase"; globeCtl.enabled = m === "globe";
+  $("hud").toggleAttribute("hidden", m !== "cockpit");   // SVG elements have no .hidden property
+  $("hint").innerHTML = m === "cockpit" ? "Drag to look around, double-click to centre<br>F3 toggles the debug screen"
+    : m === "globe" ? "Drag to spin the globe, scroll to zoom<br>F3 toggles the debug screen" : "Drag to orbit, scroll to zoom<br>F3 toggles the debug screen";
+  if (m === "globe" && fix) {
+    const d = globeCam.position.length() || 260;
+    globeCam.position.copy(vec(fix.lat - 6, fix.lon + 4, d < 120 ? 260 : d)); globeCtl.update();
+  }
+  canvas.style.cursor = m === "cockpit" ? "crosshair" : "grab";
+}
+document.querySelectorAll(".modes button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+addEventListener("keydown", (e) => {
+  if (e.key === "1") setMode("chase"); if (e.key === "2") setMode("cockpit"); if (e.key === "3") setMode("globe");
+  if (e.key === "4") toggleData();
+  if (e.key === "5") setMode("cinema");
+  if (e.key === "c" || e.key === "C") { cloudGroup.visible = !cloudGroup.visible; toast("", "Video Settings", `Clouds: ${cloudGroup.visible ? "Fancy" : "Off"}`); }
+  if (e.key === "Escape") { if (!$("data").hidden) toggleData(false); else if (cine) setMode("chase"); }
+  if (e.key === "F3") { e.preventDefault(); $("f3").hidden = !$("f3").hidden; updateF3Right(); }
+});
+let dragging = null;
+canvas.addEventListener("pointerdown", (e) => { if (cine) { setMode("chase"); return; } if (mode === "cockpit") { dragging = [e.clientX, e.clientY, look.yaw, look.pitch]; canvas.setPointerCapture(e.pointerId); } });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging || mode !== "cockpit") return;
+  look.yaw = clamp(dragging[2] - (e.clientX - dragging[0]) * 0.15, -150, 150);
+  look.pitch = clamp(dragging[3] + (e.clientY - dragging[1]) * 0.12, -60, 40);
+});
+canvas.addEventListener("pointerup", () => (dragging = null));
+canvas.addEventListener("dblclick", () => { if (mode === "cockpit") look = { yaw: 0, pitch: -4 }; });
+
+// ============================================================
+// Cockpit HUD (SVG), green, built once and updated each frame.
+// ============================================================
+const NS = "http://www.w3.org/2000/svg";
+let hud = {};
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent?.append(e); return e; }
+function buildHud() {
+  const svg = $("hud"), w = innerWidth, h = innerHeight;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.innerHTML = "";
+  const g = el("g", { class: "glow" }, svg);
+  const cx = w / 2, cy = h / 2;
+  hud = { w, h, cx, cy, g };
+  hud.ladder = el("g", {}, g);
+  hud.hdg = el("g", {}, g);
+  hud.spd = el("g", {}, g);
+  hud.alt = el("g", {}, g);
+  // Boresight and flight path marker.
+  el("path", { d: `M${cx - 34},${cy} h22 M${cx + 12},${cy} h22 M${cx},${cy - 12} v-10` }, g);
+  el("circle", { cx, cy, r: 8 }, g);
+  hud.info = el("g", {}, g);
+}
+const pad = (n, w = 3) => String(Math.round(n)).padStart(w, "0");
+const fmt = (n) => Math.round(n).toLocaleString("en-GB");
+function updateHud(st) {
+  if (!hud.g || !st) return;
+  const { w, h, cx, cy } = hud;
+  const hdg = (((st.hdg + look.yaw) % 360) + 360) % 360, pitch = look.pitch;
+  const ppd = h / 70; // pixels per degree of pitch
+
+  // Pitch ladder (horizon moves opposite to where you look).
+  hud.ladder.innerHTML = "";
+  for (let p = -30; p <= 30; p += 5) {
+    const yy = cy - (p - pitch) * ppd;
+    const lbx = cine ? h * 0.11 : 0;
+    if (yy < 120 + lbx || yy > h - 160 - lbx) continue;   // stay under the heading tape, above the bottom readouts
+    const half = p === 0 ? w * 0.32 : 70, gap = p === 0 ? 60 : 40;
+    el("path", { d: `M${cx - half},${yy} H${cx - gap} M${cx + gap},${yy} H${cx + half}`, "stroke-dasharray": p < 0 ? "10 8" : "none" }, hud.ladder);
+    if (p !== 0) { el("text", { x: cx - half - 30, y: yy + 6, "font-size": 16 }, hud.ladder).textContent = p; el("text", { x: cx + half + 10, y: yy + 6, "font-size": 16 }, hud.ladder).textContent = p; }
+  }
+
+  // Heading tape.
+  hud.hdg.innerHTML = "";
+  const ty = 60 + (cine ? h * 0.11 : 0), pxd = 9;
+  el("path", { d: `M${cx - 270},${ty} H${cx + 270}` }, hud.hdg);
+  for (let d = Math.floor((hdg - 30) / 5) * 5; d <= hdg + 30; d += 5) {
+    const x = cx + (d - hdg) * pxd; const dd = ((d % 360) + 360) % 360;
+    el("path", { d: `M${x},${ty} v${dd % 10 === 0 ? -14 : -7}` }, hud.hdg);
+    if (dd % 10 === 0) el("text", { x, y: ty - 20, "text-anchor": "middle", "font-size": 17 }, hud.hdg).textContent = dd === 0 ? "N" : dd === 90 ? "E" : dd === 180 ? "S" : dd === 270 ? "W" : pad(dd / 10, 2);
+  }
+  el("rect", { x: cx - 30, y: ty + 6, width: 60, height: 26 }, hud.hdg);
+  el("text", { x: cx, y: ty + 26, "text-anchor": "middle", "font-size": 20 }, hud.hdg).textContent = pad(hdg);
+
+  // Speed tape (left) and altitude tape (right).
+  const tape = (grp, x, val, step, label, side, unit) => {
+    grp.innerHTML = "";
+    const px = 2.4, top = cy - 170, bot = cy + 170;
+    el("path", { d: `M${x},${top} V${bot}` }, grp);
+    for (let v = Math.floor((val - 70 * step / 10) / step) * step; v <= val + 70 * step / 10; v += step) {
+      const y = cy - ((v - val) / step) * 10 * px;
+      if (y < top || y > bot) continue;
+      el("path", { d: `M${x},${y} h${side * (v % (step * 5) === 0 ? 14 : 7)}` }, grp);
+      if (v % (step * 5) === 0) el("text", { x: x + side * 22, y: y + 6, "text-anchor": side > 0 ? "start" : "end", "font-size": 15 }, grp).textContent = label(v);
+    }
+    const bw = 92, bx = side > 0 ? x - bw - 8 : x + 8;
+    el("rect", { x: bx, y: cy - 16, width: bw, height: 32 }, grp);
+    el("text", { x: bx + bw / 2, y: cy + 8, "text-anchor": "middle", "font-size": 22 }, grp).textContent = label(val, true);
+    el("text", { x: bx + bw / 2, y: cy + 36, "text-anchor": "middle", "font-size": 13 }, grp).textContent = unit;
+  };
+  tape(hud.spd, cx - w * 0.3, st.gs, 10, (v) => fmt(v), -1, "GS KT");
+  tape(hud.alt, cx + w * 0.3, fix.altFt, 100, (v, box) => (box ? fmt(v) : fmt(v)), 1, "ALT FT");
+
+  // Text blocks.
+  hud.info.innerHTML = "";
+  const line = (x, y, txt, cls, anchor = "start", size = 17) => { const t = el("text", { x, y, "text-anchor": anchor, "font-size": size }, hud.info); t.textContent = txt; if (cls) t.setAttribute("class", cls); };
+  const utcNow = new Date();
+  const z = `${pad(utcNow.getUTCHours(), 2)}:${pad(utcNow.getUTCMinutes(), 2)}:${pad(utcNow.getUTCSeconds(), 2)}Z`;
+  // Keep clear of the XP bar, the minimap (bottom right) and, in cinema, the letterbox and caption.
+  const lb = cine ? h * 0.11 : 0;
+  line(40, 40 + lb, `${ROUTE.callsign}  ${ROUTE.tail || ""}  ${(ROUTE.type || "").replace(/^B7(\d)7-(\d+)$/, "B7$1$2")}`);
+  line(40, 64 + lb, `FL${pad(fix.altFt / 100)}   GS ${st.gs}   TRK ${pad(st.hdg)}`);
+  const sat = server?.probe?.rtt_ms, online = server?.online;
+  const satTxt = online === false ? "SATCOM LOST" : sat ? `SATCOM ${(sat / 1000).toFixed(1)} S` : "SATCOM --";
+  const by = h - lb - (cine ? 150 : 90);
+  const ry = h - lb - (cine ? 14 : 0) - 290;
+  line(40, by, z);
+  const g2 = el("g", { class: online === false ? "bad" : "" }, hud.info);
+  const t2 = el("text", { x: 40, y: by + 26, "font-size": 17 }, g2); t2.textContent = satTxt + (online === false && Math.floor(performance.now() / 500) % 2 ? "  ●" : "");
+  const toGo = d3.geoDistance([st.lon, st.lat], DEST) * R_KM;
+  const f = rawFeeds["/flightdata/v2/flightdata"]?.body || fix.raw || {};
+  const ex = rawFeeds["/exconnect/v1/status"]?.body || {};
+  const d = (v, u = "") => (v === null || v === undefined || v === "" ? "---" : `${v}${u}`);
+  line(40, by - 78, `OAT ${d(f.outside_air_temp_celsius, "°C")}   M ${d(f.flight_speed_mach)}`);
+  line(40, by - 52, `WIND ${d(f.wind_direction_degree, "°")}/${d(f.wind_speed_knots)}   HW ${d(f.head_wind_speed_knots)}`);
+  line(40, by - 26, `${String(f.flight_phase ?? "---").toUpperCase()}   DOORS ${String(f.all_doors_state ?? "---").toUpperCase()}   ${String(f.weight_on_wheels_state ?? "---").toUpperCase()}${f.decompression_state ? "   DECOMPRESSION" : ""}`, f.decompression_state ? "bad" : "");
+  line(w - 40, ry - 78, `${d(f.distance_to_destination_nautical_miles, " NM")}   ${d(f.time_to_destination_minutes, " MIN")}`, "", "end");
+  line(w - 40, ry - 52, `COVERAGE CHG ${d(ex.time_until_coverage_change)}   REM ${d(ex.total_coverage_remaining)}`, "", "end");
+  line(w - 40, ry - 26, `${d(f.departure_icao)} ${d(f.time_at_origin)}   ${d(f.destination_icao)} ${d(f.time_at_destination)}   ${d(f.distance_covered_percentage, "%")}`, "", "end");
+  line(w - 40, ry, `${ROUTE.dest.icao}  ${fmt(toGo)} KM`, "", "end");
+  const eta = arrivalMs();
+  line(w - 40, ry + 26, eta ? `ETA ${fmtZ.format(eta)}Z   T/O ${String(f.takeoff_time_utc || "").slice(11, 16)}Z` : "", "", "end");
+  const inZone = russia && d3.geoContains(russia, [st.lon, st.lat]);
+  const g3 = el("g", { class: inZone ? "warn" : "" }, hud.info);
+  const t3 = el("text", { x: cx, y: 128 + lb, "text-anchor": "middle", "font-size": 17 }, g3);
+  t3.textContent = inZone ? (online === false ? "RUSSIAN AIRSPACE  NO SATCOM" : "RUSSIAN AIRSPACE  SATCOM HOLDING") : "SATCOM COVERAGE";
+}
+
+// ============================================================
+// F3 debug screen
+// ============================================================
+const compass = (d) => ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(d / 45) % 8];
+let f3At = 0;
+function updateF3(st, ground, sunInfo) {
+  if ($("f3").hidden || !st || performance.now() - f3At < 250) return;
+  f3At = performance.now();
+  const sat = server?.probe?.rtt_ms, surge = server?.probe?.surge_ms, online = server?.online;
+  const inZone = russia && d3.geoContains(russia, [st.lon, st.lat]);
+  const toGo = d3.geoDistance([st.lon, st.lat], DEST) * R_KM;
+  const rows = [
+    ["t", `${ROUTE.flight} Voxel Edition (${[ROUTE.tail, typeName()].filter(Boolean).join(", ")})`],
+    ["", `XYZ: ${st.lon.toFixed(3)} / ${fmt(fix.altFt)} ft / ${st.lat.toFixed(3)}`],
+    ["", `Facing: ${compass(st.hdg)} (${pad(st.hdg)}°)   GS ${st.gs} kt (${fmt(st.gs * KT_KMH)} km/h)`],
+    ["", `Biome: ${ground ? BIOME[ground.kind] : "unknown"}   Ground: ${ground ? fmt(Math.max(0, ground.elev)) + " m" : "--"}`],
+    ["", `Chunk: ${chunk ? chunk.lat0.toFixed(2) + ", " + chunk.lon0.toFixed(2) : "--"}   Block: ${chunk ? (chunk.b >= 1 ? chunk.b + " km" : chunk.b * 1000 + " m") : "--"}   Blocks: ${fmt(stats.blocks)}   Trees: ${fmt(stats.trees)}`],
+    [online === false ? "bad" : "good", `SATCOM: ${online === false ? "LOST" : sat ? (sat / 1000).toFixed(1) + " s" : "--"}   Proxy: ${surge ? (surge / 1000).toFixed(1) + " s" : "--"}`],
+    [inZone ? "bad" : "", `Russian airspace: ${inZone ? "yes" : "no"}`],
+    ["", `To ${ROUTE.dest.icao}: ${fmt(toGo)} km   ETA ${arrivalMs() ? fmtZ.format(arrivalMs()) + "Z (" + fmtLocal(arrivalMs()) + " " + ROUTE.dest.city + ")" : "--"}`],
+    ["", `Sun: ${(sunInfo.el / D2R).toFixed(1)}° ${sunInfo.el / D2R < -6 ? "(night)" : sunInfo.el / D2R < 6 ? "(golden hour)" : "(day)"}`],
+    ["", `Tiles cached: ${[...tiles.values()].filter((t) => t.state === "ok").length}   Clouds: ${cloudGroup.visible ? "on" : "off"} (C)`],
+  ];
+  updateF3Right();
+  $("f3").innerHTML = rows.map(([c, t]) => `<div class="${c}"></div>`).join("");
+  [...$("f3").children].forEach((d, k) => (d.textContent = rows[k][1]));
+}
+
+// ============================================================
+// Every field from the aircraft's Panasonic server, verbatim.
+// ============================================================
+let rawFeeds = {};
+const prevVals = new Map(), changedAt = new Map();
+const LABELS = {
+  decompression_state: "Cabin decompression", weight_on_wheels: "Weight on wheels", all_doors_closed: "All doors closed",
+  ground_speed_knots: "Ground speed (kt)", time_to_destination_minutes: "Time to destination (min)", wind_speed_knots: "Wind speed (kt)",
+  flight_speed_mach: "Mach number", true_heading_degree: "True heading (°)", current_utc_time: "UTC time",
+  outside_air_temp_celsius: "Outside air temperature (°C)", head_wind_speed_knots: "Headwind (kt)", current_utc_date: "UTC date",
+  distance_to_destination_nautical_miles: "Distance to destination (nm)", altitude_feet: "Altitude (ft)",
+  destination_icao: "Destination ICAO", departure_icao: "Departure ICAO", flight_number: "Flight number (ICAO)",
+  destination_iata: "Destination IATA", departure_iata: "Departure IATA", tail_number: "Registration", flight_phase: "Flight phase",
+  departure_utc_offset_minutes: "Departure UTC offset (min)", destination_utc_offset_minutes: "Destination UTC offset (min)",
+  route_id: "Route ID", time_at_origin: "Local time at origin", time_at_destination: "Local time at destination",
+  distance_from_departure_nautical_miles: "Distance from departure (nm)", distance_traveled_nautical_miles: "Distance travelled (nm)",
+  estimated_arrival_time_utc: "Estimated arrival (labelled UTC)", takeoff_time_utc: "Takeoff (UTC)", wind_direction_degree: "Wind direction (°)",
+  media_date: "Media date", extv_channel_listing_version: "Live TV channel list version",
+  "current_coordinates.latitude": "Current latitude", "current_coordinates.longitude": "Current longitude",
+  "departure_coordinates.latitude": "Departure latitude", "departure_coordinates.longitude": "Departure longitude",
+  "destination_coordinates.latitude": "Destination latitude", "destination_coordinates.longitude": "Destination longitude",
+  aircraft_type: "Aircraft type", all_doors_state: "Doors", disclaimer: "Disclaimer", flight_id: "Flight ID", flight_state: "Flight state",
+  passenger_anouncement: "Passenger announcements", weight_on_wheels_state: "Weight on wheels (state)",
+  distance_covered_percentage: "Distance covered (%)", global_conn_enabled: "Connectivity enabled",
+  internet_connectivity_status: "Internet connected", time_until_coverage_change: "Time until coverage change",
+  total_coverage_remaining: "Coverage remaining", commissioning_status: "Live TV commissioning", code: "Code", text: "Text",
+  "error.code": "Error code", "error.message": "Error message", body: "Response body",
+};
+const FEED_NAMES = {
+  "/flightdata/v2/flightdata": "Flight data, v2", "/flightdata/v1/flightdata": "Flight data, v1 (avionics bus codes)",
+  "/exconnect/v1/status": "eXConnect internet status", "/exconnect/v1/wisp_product_info": "Wi-Fi product info",
+  "/airport_info/v1/multi_airport_info": "Airport info", "/connecting_gate/v1/connecting_gate_info": "Connecting gates",
+  "/extv_metadata/v1/commissioning_status": "Live TV commissioning", "/extv_metadata/v1/station_status": "Live TV station status",
+  "/extv_metadata/v1/stations": "Live TV stations", "/maps/v1/flight_map": "Seatback moving map",
+};
+const humanize = (k) => LABELS[k] || (k.replace(/^td_id_(pdi_)?(fltdata_)?/, "").replace(/\[(\d+)\]/g, " $1").replace(/[._]/g, " ").replace(/^./, (c) => c.toUpperCase()));
+
+// The v1 feed is raw ARINC-style strings; decode the ones whose format is clear.
+function v1Hint(key, v) {
+  if (typeof v !== "string" || v === "") return "";
+  const n = (s) => Number(s);
+  if (/present_position_(latitude|longitude)$/.test(key) && /^\d{8}$/.test(v)) {
+    const deg = n(v.slice(0, 5)), min = n(v.slice(5)) / 10;
+    return `${deg}° ${min.toFixed(1)}′ = ${(deg + min / 60).toFixed(4)}°`;
+  }
+  if (/fltdata_date$/.test(key) && /^\d{8}$/.test(v)) return `${v.slice(2, 4)}/${v.slice(4, 6)}/20${v.slice(6)} (day/month/year)`;
+  if (/time_at_takeoff$/.test(key) && /^\d{12}$/.test(v)) return `${v.slice(2, 4)}/${v.slice(4, 6)}/20${v.slice(6, 8)} ${v.slice(8, 10)}:${v.slice(10)} UTC`;
+  if (/(_gmt|time_at_origin|time_at_destination|estimated_arrival_time)$/.test(key) && /^\d{4}$/.test(v)) return `${v.slice(0, 2)}:${v.slice(2)}`;
+  if (/^td_id_(decompression|weight_on_wheels|all_doors_closed|x2_pa_state)$/.test(key)) return v === "1" ? "1 = true" : v === "0" ? "0 = false" : "";
+  if (/^\d+(\.\d+)?$/.test(v) && /^0\d/.test(v)) return `= ${n(v).toLocaleString("en-GB")}`;
+  return "";
+}
+
+function flatten(obj, prefix = "", out = []) {
+  if (obj === null || typeof obj !== "object") { out.push([prefix || "body", obj]); return out; }
+  if (Array.isArray(obj)) {
+    if (!obj.length) out.push([prefix || "body", obj]);
+    obj.forEach((v, i) => flatten(v, `${prefix}[${i}]`, out));
+    return out;
+  }
+  const keys = Object.keys(obj);
+  if (!keys.length) out.push([prefix || "body", obj]);
+  for (const k of keys) flatten(obj[k], prefix ? `${prefix}.${k}` : k, out);
+  return out;
+}
+
+function valueCell(key, v) {
+  const td = document.createElement("td"); td.className = "v";
+  const main = document.createElement("span");
+  if (v === null) { main.className = "null"; main.textContent = "null"; }
+  else if (typeof v === "boolean") { main.className = String(v); main.textContent = String(v); }
+  else if (Array.isArray(v)) main.textContent = v.length ? JSON.stringify(v) : "[] (empty list)";
+  else if (typeof v === "object") main.textContent = "{} (empty object)";
+  else if (v === "") main.textContent = '"" (empty string)';
+  else main.textContent = typeof v === "string" && /<[a-z][\s\S]*>/i.test(v) ? v.replace(/<[^>]+>/g, "").trim() : String(v);
+  td.append(main);
+  const notes = [];
+  if (v === null) notes.push("not sent by the aircraft");
+  if (typeof v === "string" && /<[a-z][\s\S]*>/i.test(v)) notes.push("HTML error page from the server");
+  const h = v1Hint(key, v); if (h) notes.push(h);
+  if (/estimated_arrival_time(_utc)?$/.test(key) && v) notes.push("on HU7963 this was destination local time, not UTC; the ETA here uses minutes-to-go instead");
+  if (key === "distance_to_destination_nautical_miles" || key === "distance_from_departure_nautical_miles") notes.push("doesn't match the aircraft's position; not used");
+  if (notes.length) { const s = document.createElement("small"); s.textContent = notes.join(", "); td.append(s); }
+  return td;
+}
+
+function renderData() {
+  const body = $("data-body");
+  if ($("data").hidden) return;
+  const frag = document.createDocumentFragment();
+  let fields = 0;
+  for (const [path, feed] of Object.entries(rawFeeds)) {
+    const sec = document.createElement("section");
+    const h3 = document.createElement("h3");
+    const age = feed.at ? Math.round(Date.now() / 1000 - feed.at) : null;
+    h3.innerHTML = `<span></span><small></small>`;
+    h3.firstChild.textContent = FEED_NAMES[path] || path;
+    h3.lastChild.textContent = `${path}  HTTP ${feed.status ?? "no reply"}${age != null ? `  ${age} s ago` : ""}`;
+    sec.append(h3);
+    if (feed.error) { const p = document.createElement("div"); p.className = "note"; p.textContent = `Request failed: ${feed.error}`; sec.append(p); }
+    const table = document.createElement("table");
+    for (const [key, v] of flatten(feed.body)) {
+      fields++;
+      const id = path + " " + key, sv = JSON.stringify(v);
+      if (prevVals.has(id) && prevVals.get(id) !== sv) changedAt.set(id, Date.now());
+      prevVals.set(id, sv);
+      const tr = document.createElement("tr");
+      if (Date.now() - (changedAt.get(id) || 0) < 4000) tr.className = "changed";
+      const k = document.createElement("td"); k.className = "k";
+      k.textContent = humanize(key);
+      const raw = document.createElement("small"); raw.textContent = key; k.append(raw);
+      tr.append(k, valueCell(key, v));
+      table.append(tr);
+    }
+    sec.append(table);
+    frag.append(sec);
+  }
+  body.replaceChildren(frag);
+  $("data-sub").textContent = `${fields} fields from ${Object.keys(rawFeeds).length} endpoints on the aircraft's Panasonic server, verbatim. Highlighted rows just changed.`;
+}
+
+async function pollRaw() {
+  try {
+    rawFeeds = await fetch("/api/raw").then((r) => r.json());
+    // Track changes even while the window is closed, so highlights mean something.
+    if ($("data").hidden) for (const [path, feed] of Object.entries(rawFeeds)) for (const [key, v] of flatten(feed.body)) {
+      const id = path + " " + key, sv = JSON.stringify(v);
+      if (prevVals.has(id) && prevVals.get(id) !== sv) changedAt.set(id, Date.now());
+      prevVals.set(id, sv);
+    }
+    renderData();
+  } catch { /* keep the last copy */ }
+}
+function toggleData(open = $("data").hidden) {
+  $("data").hidden = !open;
+  document.body.classList.toggle("data-open", open);
+  $("btn-data").setAttribute("aria-pressed", open);
+  if (open) renderData();
+}
+$("btn-data").onclick = () => toggleData();
+$("data-close").onclick = () => toggleData(false);
+
+// F3 right column: the aircraft's own systems, from the same feeds.
+const show = (v, unit = "") => (v === null || v === undefined || v === "" ? "null" : `${v}${unit}`);
+function updateF3Right() {
+  if ($("f3").hidden) { $("f3r").hidden = true; return; }
+  $("f3r").hidden = false;
+  const f = rawFeeds["/flightdata/v2/flightdata"]?.body || fix?.raw || {};
+  const v1 = rawFeeds["/flightdata/v1/flightdata"]?.body || {};
+  const ex = rawFeeds["/exconnect/v1/status"]?.body || {};
+  const tv = rawFeeds["/extv_metadata/v1/commissioning_status"]?.body || {};
+  const pa = f.passenger_anouncement;
+  const rows = [
+    ["t", "Panasonic eXConnect (from the aircraft)"],
+    ["", `Phase: ${show(f.flight_phase)} (v1 code ${show(v1.td_id_flight_phase)})   State: ${show(f.flight_state)}`],
+    [f.all_doors_closed === false ? "bad" : "good", `Doors: ${show(f.all_doors_state)}, all closed ${show(f.all_doors_closed)}`],
+    ["", `Weight on wheels: ${show(f.weight_on_wheels_state)} (${show(f.weight_on_wheels)})`],
+    [f.decompression_state ? "bad" : "good", `Decompression: ${show(f.decompression_state)}`],
+    ["", `OAT: ${show(f.outside_air_temp_celsius, " °C")}   Mach: ${show(f.flight_speed_mach)}`],
+    ["", `Wind: ${show(f.wind_direction_degree, "°")} / ${show(f.wind_speed_knots, " kt")}   Headwind: ${show(f.head_wind_speed_knots, " kt")}`],
+    ["", `Local time: ${show(f.time_at_origin)} ${ROUTE.origin.code || ""}   ${show(f.time_at_destination)} ${ROUTE.dest.code || ""}`],
+    ["", `To go: ${show(f.distance_to_destination_nautical_miles, " nm")}   ${show(f.time_to_destination_minutes, " min")}`],
+    ["", `Covered: ${show(f.distance_covered_percentage, "%")}   Travelled: ${show(f.distance_traveled_nautical_miles, " nm")}`],
+    [ex.internet_connectivity_status === false ? "bad" : "good", `Internet: ${show(ex.internet_connectivity_status)}   Enabled: ${show(ex.global_conn_enabled)}`],
+    ["", `Coverage change in: ${show(ex.time_until_coverage_change)}   Remaining: ${show(ex.total_coverage_remaining)}`],
+    ["", `Cabin PA: ${Array.isArray(pa) ? (pa.length ? pa.length + " active" : "none") : show(pa)} (v1 ${show(v1.td_id_x2_pa_state)})`],
+    ["", `Live TV: ${show(tv.commissioning_status)}   Route ID: ${show(f.route_id)}`],
+    ["", `Flight ID: ${show(f.flight_id)}`],
+    ["t", "Press 4 for every field"],
+  ];
+  $("f3r").innerHTML = rows.map(([c]) => `<div class="${c}"></div>`).join("");
+  [...$("f3r").children].forEach((d, k) => (d.textContent = rows[k][1]));
+}
+
+// ============================================================
+// Frame loop
+// ============================================================
+const tmp = new THREE.Vector3(), prevPlane = new THREE.Vector3();
+let rebuilding = false, lastFrame = performance.now(), trailAt = 0, routeAt = 0, smoothHdg = null;
+
+function placePlane(st) {
+  const [x, z] = toLocal(st.lat, st.lon);
+  const y = st.alt / chunk.vm;
+  if (smoothHdg === null) smoothHdg = st.hdg;
+  let dh = ((st.hdg - smoothHdg + 540) % 360) - 180; smoothHdg += dh * 0.05;
+  plane.position.set(x, y, z);
+  plane.rotation.set(0, (90 - smoothHdg) * D2R, -dh * 0.02);
+}
+
+function frame() {
+  requestAnimationFrame(frame);
+  const t = performance.now(), dt = Math.min(0.1, (t - lastFrame) / 1000); lastFrame = t;
+  const st = now();
+  if (!st || !chunk) return;
+
+  // Regenerate the chunk when the aircraft nears its edge.
+  const [lx, lz] = toLocal(st.lat, st.lon);
+  const wantB = blockKmFor(chunk.b, st.alt);
+  if (!rebuilding && (Math.hypot(lx, lz) > REBUILD_AT || wantB !== chunk.b)) {
+    rebuilding = true;
+    const planeOld = plane.position.clone(), camOff = chaseCam.position.clone().sub(planeOld);
+    buildChunk(st.lat, st.lon, wantB).then((prev) => {
+      // Re-place the aircraft in the new frame first, so the next frame's motion delta is small
+      // (otherwise the chase camera gets shifted twice and flies off).
+      placePlane(now());
+      if (prev.b === chunk.b) {
+        const [ox, oz] = [((chunk.lon0 - prev.lon0) * 111.32 * prev.cosl) / prev.b, (-(chunk.lat0 - prev.lat0) * 110.574) / prev.b];
+        for (const p of [...trailPts, ...fumePts]) { p.x -= ox; p.z -= oz; }
+      } else {
+        trailPts.length = 0; fumePts.length = 0;   // particles were in the old scale
+        toast("", "Advancement Made!", `Zoom: ${chunk.b < prev.b ? "finer" : "coarser"} blocks, ${chunk.b >= 1 ? chunk.b + " km" : chunk.b * 1000 + " m"} each`);
+      }
+      chaseCam.position.copy(plane.position).add(camOff);
+      chaseCtl.target.copy(plane.position);
+      rebuilding = false;
+    });
+  }
+
+  prevPlane.copy(plane.position);
+  placePlane(st);
+  const delta = tmp.copy(plane.position).sub(prevPlane);
+
+  // Sun, sky, fog.
+  const s = sunAt(new Date(), st.lat, st.lon);
+  const sky = mix3(SKY, s.el), hor = mix3(HORIZON, s.el);
+  skyU.top.value.copy(sky); skyU.horizon.value.copy(hor);
+  const sunDir = new THREE.Vector3(Math.sin(s.az) * Math.cos(s.el), Math.sin(s.el), -Math.cos(s.az) * Math.cos(s.el));
+  skyU.sunDir.value.copy(sunDir);
+  world.fog.color.copy(hor);
+  const view = cine ? SHOTS[cine.i].id : mode;
+  const cam = view === "cockpit" ? cockpitCam : chaseCam;
+  skyDome.position.copy(cam.position);
+  sunSquare.position.copy(cam.position).addScaledVector(sunDir, 700); sunSquare.lookAt(cam.position);
+  sunSquare.visible = s.el / D2R > -3;
+  const dayK = clamp((s.el / D2R + 6) / 18, 0, 1);
+  sun.intensity = 0.25 + dayK * 1.5; hemi.intensity = 0.35 + dayK * 0.65;
+  const bright = 0.3 + dayK * 0.7, warm = s.el / D2R < 8 && s.el / D2R > -4 ? 0.9 : 1;
+  for (const m of blockMaterials) m.color.setRGB(bright, bright * (0.5 + warm / 2), bright * warm);
+  TEX.water.offset.set((t * 0.00004) % 1, (t * 0.00007) % 1);
+  sun.color.set(s.el / D2R < 8 ? 0xffc48a : 0xffffff);
+  sun.position.set(plane.position.x + Math.sin(s.az) * 100, plane.position.y + Math.max(0.1, Math.sin(s.el)) * 100, plane.position.z - Math.cos(s.az) * 100);
+  sun.target.position.copy(plane.position);
+
+  // Lights blink; clouds drift.
+  const ud = plane.userData;
+  ud.strobes.forEach((m) => (m.visible = t % 1200 < 70));
+  ud.beacons.forEach((m) => (m.visible = t % 1000 < 120));
+  cloudGroup.position.x += dt * 0.04;
+
+  // Engine fumes and contrails. The real aircraft moves ~0.12 blocks/s, so particles
+  // are given their own backward drift to stream like they would at 480 knots.
+  const F = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+  fumeAcc += dt * 14;
+  while (fumeAcc >= 1) {
+    fumeAcc -= 1;
+    for (const e of ud.engines) {
+      const wp = plane.localToWorld(e.clone()), j = () => (Math.random() - 0.5) * 0.35;
+      fumePts.push({ x: wp.x, y: wp.y, z: wp.z, v: F.clone().multiplyScalar(-(1.6 + Math.random() * 0.5)).add(new THREE.Vector3(j() * 0.3, j() * 0.3 + 0.02, j() * 0.3)),
+                     born: t, life: 0.6 + Math.random() * 0.4, s0: 0.025 + Math.random() * 0.015 });
+    }
+  }
+  while (fumePts.length > FUME_MAX) fumePts.shift();
+  const mx = new THREE.Matrix4(), fc = new THREE.Color();
+  let n = 0;
+  for (const p of fumePts) {
+    const a = (t - p.born) / 1000 / p.life;
+    if (a >= 1) continue;
+    p.x += p.v.x * dt; p.y += p.v.y * dt; p.z += p.v.z * dt; p.v.multiplyScalar(1 - 0.7 * dt);
+    const size = (p.s0 + a * 0.07) * (a > 0.6 ? 1 - (a - 0.6) / 0.4 : 1);
+    mx.makeScale(size, size, size).setPosition(p.x, p.y, p.z);
+    fumes.setMatrixAt(n, mx);
+    const g = 0.86 + a * 0.12; fc.setRGB(g, g, g * 1.01);
+    fumes.setColorAt(n++, fc);
+  }
+  fumes.count = n; fumes.instanceMatrix.needsUpdate = true; if (fumes.instanceColor) fumes.instanceColor.needsUpdate = true;
+
+  if (t - trailAt > 90) {
+    trailAt = t;
+    for (const e of ud.engines) {
+      const wp = plane.localToWorld(e.clone()).addScaledVector(F, -1.2);
+      trailPts.push(Object.assign(wp, { born: t, v: F.clone().multiplyScalar(-1.15) }));
+    }
+    while (trailPts.length > TRAIL_MAX) trailPts.shift();
+  }
+  n = 0;
+  for (const p of trailPts) {
+    const age = (t - p.born) / 1000;
+    if (age > 10) continue;
+    p.addScaledVector(p.v, dt);
+    const sc = 0.045 + age * 0.012;
+    mx.makeScale(sc, sc, sc).setPosition(p.x, p.y - age * 0.015, p.z);
+    trail.setMatrixAt(n++, mx);
+  }
+  trail.count = n; trail.instanceMatrix.needsUpdate = true;
+
+  const ground = groundAt(plane.position.x, plane.position.z);
+
+  // HUD only in the cockpit (manual or cinematic).
+  const wantHud = view === "cockpit";
+  if (wantHud !== hudShown) { $("hud").toggleAttribute("hidden", !wantHud); hudShown = wantHud; }
+
+  if (cine) {
+    const shot = SHOTS[cine.i], sec = (t - cine.t0) / 1000, k = Math.min(1, sec / shot.dur);
+    $("fade").style.opacity = Math.max(0, 1 - sec / 0.7, 1 - (shot.dur - sec) / 0.7).toFixed(3);
+    if (sec >= shot.dur) { cine.i = (cine.i + 1) % SHOTS.length; cine.t0 = t; showCaption(); }
+    shootCinema(shot.id, k, st);
+  } else if (mode === "chase") {
+    chaseCam.position.add(delta);
+    chaseCtl.target.copy(plane.position);
+    chaseCtl.update();
+    plane.visible = true;
+    renderer.render(world, chaseCam);
+  } else if (mode === "cockpit") {
+    renderCockpit(st);
+  } else {
+    renderGlobe(st, s, t);
+    globeCtl.update();
+    renderer.render(globe, globeCam);
+  }
+  updateF3(st, ground, s);
+}
+
+function renderCockpit(st) {
+  plane.visible = false;
+  const nose = plane.localToWorld(plane.userData.cockpit.clone());
+  cockpitCam.position.copy(nose);
+  const yaw = (90 - smoothHdg - look.yaw) * D2R, pitch = look.pitch * D2R;
+  const dir = new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
+  cockpitCam.lookAt(nose.clone().add(dir));
+  renderer.render(world, cockpitCam);
+  updateHud(st);
+}
+
+function renderGlobe(st, s, t) {
+  const p = vec(st.lat, st.lon, GR + 0.9), up = p.clone().normalize();
+  const [alon, alat] = destination([st.lon, st.lat], st.hdg, 80);
+  const fwd = vec(alat, alon, GR + 0.9).sub(p).projectOnPlane(up).normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, up);
+  plane2.position.copy(p);
+  plane2.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(fwd, up, right));
+  gSun.position.copy(vec(s.decl / D2R, s.subLon, 1000));
+  if (t - routeAt > 20000) { routeAt = t; rebuildRoute(); }
+}
+
+// ============================================================
+// Cinematic mode: a loop of shots with fades and captions.
+// ============================================================
+let cine = null, hudShown = false, fumeAcc = 0;
+const SHOTS = [
+  { id: "orbit", dur: 18 }, { id: "flyby", dur: 8 }, { id: "wing", dur: 10 }, { id: "cockpit", dur: 11 },
+  { id: "high", dur: 12 }, { id: "low", dur: 9 }, { id: "globe", dur: 14 },
+];
+// Test hook: jump straight to a shot (used when checking the page in a browser).
+window.__shot = (i, offsetSec = 2.5) => { if (!cine) startCinema(); cine.i = i; cine.t0 = performance.now() - offsetSec * 1000; showCaption(); };
+function startCinema() {
+  cine = { i: 0, t0: performance.now(), a0: Math.random() * Math.PI * 2 };
+  document.body.classList.add("cinema");
+  chaseCtl.enabled = false; globeCtl.enabled = false;
+  look = { yaw: 0, pitch: -6 };
+  showCaption();
+}
+function endCinema() {
+  cine = null;
+  document.body.classList.remove("cinema");
+  $("fade").style.opacity = 0; $("caption").classList.remove("on");
+  look = { yaw: 0, pitch: -4 };
+  // Hand the chase camera back where the shot left it, aimed at the aircraft.
+  chaseCtl.target.copy(plane.position);
+}
+
+let countries = null, placeCache = { at: -Infinity, name: "" };
+function placeName(st) {
+  if (performance.now() - placeCache.at < 10000) return placeCache.name;
+  const hit = countries?.features.find((f) => d3.geoContains(f, [st.lon, st.lat]));
+  placeCache = { at: performance.now(), name: hit ? hit.properties.name : "open water" };
+  return placeCache.name;
+}
+function showCaption() {
+  const st = now(); if (!st) return;
+  const f = rawFeeds["/flightdata/v2/flightdata"]?.body || fix.raw || {};
+  const g = groundAt(plane.position.x, plane.position.z);
+  const pct = Math.round((1 - d3.geoDistance([st.lon, st.lat], DEST) / d3.geoDistance(ORIG, DEST)) * 100);
+  const toGo = fmt(d3.geoDistance([st.lon, st.lat], DEST) * R_KM);
+  const place = placeName(st);
+  const caps = {
+    orbit: [`Over ${place}`, `${ROUTE.callsign} at FL${pad(fix.altFt / 100)}, ${st.gs} knots, heading ${pad(st.hdg)}°`],
+    flyby: [typeName() || ROUTE.flight, [ROUTE.tail, airlineName(), `${ROUTE.origin.code} to ${ROUTE.dest.code}`].filter(Boolean).join(", ")],
+    wing: ["Engine 2, GEnx-1B", `Outside air ${f.outside_air_temp_celsius ?? "not reported by the aircraft"}${f.outside_air_temp_celsius != null ? " °C" : ""}`],
+    cockpit: ["Flight deck", `${String(f.flight_phase || "cruising").replace(/^./, (c) => c.toUpperCase())}, ${toGo} km to ${ROUTE.dest.city}`],
+    high: [`${place} from ${fmt(fix.altFt)} ft`, g ? `Ground ${fmt(Math.max(0, g.elev))} m below, ${BIOME[g.kind]}` : ""],
+    low: ["From underneath", `Doors ${f.all_doors_state || "closed"}, weight on wheels: ${f.weight_on_wheels_state || "air"}`],
+    globe: [`${pct}% of the way to ${ROUTE.dest.city}`, arrivalMs() ? `Lands around ${fmtLocal(arrivalMs())} local time, ${fmtZ.format(arrivalMs())}Z` : ""],
+  };
+  const [title, sub] = caps[SHOTS[cine.i].id];
+  const c = $("caption"); c.classList.remove("on");
+  setTimeout(() => { $("cap-title").textContent = title; $("cap-sub").textContent = sub; c.classList.add("on"); }, 700);
+}
+
+function shootCinema(id, k, st) {
+  const P = plane.position;
+  const F = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+  const Rt = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion);
+  const U = new THREE.Vector3(0, 1, 0);
+  const cam = chaseCam;
+  plane.visible = id !== "cockpit";
+  if (id === "cockpit") {
+    look.yaw = Math.sin(k * Math.PI * 2) * 55; look.pitch = -6 + Math.sin(k * Math.PI) * 3;
+    renderCockpit(st); return;
+  }
+  if (id === "globe") {
+    const s = sunAt(new Date(), st.lat, st.lon);
+    renderGlobe(st, s, performance.now());
+    globeCam.position.copy(vec(st.lat - 14 + 9 * k, st.lon + 30 * (1 - k) - 6, 270 - 120 * k));
+    globeCam.lookAt(plane2.position.clone().multiplyScalar(0.92));
+    renderer.render(globe, globeCam); return;
+  }
+  switch (id) {
+    case "orbit": {   // a full 360 around the aircraft, rising and dipping
+      const a = cine.a0 + k * Math.PI * 2, el = 0.15 + 0.11 * Math.sin(k * Math.PI * 2), r = 9.5 - 2 * Math.sin(k * Math.PI);
+      cam.position.copy(P).addScaledVector(F, Math.cos(a) * r * Math.cos(el)).addScaledVector(Rt, Math.sin(a) * r * Math.cos(el)).addScaledVector(U, r * Math.sin(el));
+      cam.lookAt(P); break;
+    }
+    case "flyby":     // the aircraft sweeps past a camera off its right wing
+      cam.position.copy(P).addScaledVector(F, 13 - 26 * k).addScaledVector(Rt, 3.4).addScaledVector(U, -0.4);
+      cam.lookAt(P); break;
+    case "wing":      // over the right wing, looking forward at engine 2 and the cabin
+      cam.position.copy(plane.localToWorld(new THREE.Vector3(-22 + 7 * k, 10, 46)));
+      cam.lookAt(plane.localToWorld(new THREE.Vector3(18, -7, 14 - 10 * k))); break;
+    case "high": {    // high above, slowly circling
+      const a = cine.a0 + k * 0.9;
+      cam.position.copy(P).addScaledVector(U, 38 - 10 * k).addScaledVector(F, Math.cos(a) * 13).addScaledVector(Rt, Math.sin(a) * 13);
+      cam.lookAt(P); break;
+    }
+    case "low":       // below and behind, looking up at the belly and the fumes
+      cam.position.copy(P).addScaledVector(F, -7 + 3 * k).addScaledVector(U, -2.6).addScaledVector(Rt, -1.6);
+      cam.lookAt(P.clone().addScaledVector(F, 2)); break;
+  }
+  renderer.render(world, cam);
+}
+
+// ============================================================
+// Minimap: whole route at 200x112, scaled up with hard pixels.
+// ============================================================
+const mm = { proj: null, bg: null };
+function buildMinimap() {
+  const c = $("mm"), W = c.width, H = c.height;
+  // Fit the whole route, on a conic centred on it.
+  const interp = d3.geoInterpolate(ORIG, DEST), pts = d3.range(0, 1.0001, 0.05).map(interp), lats = pts.map((p) => p[1]);
+  mm.proj = d3.geoConicConformal().parallels([Math.max(-75, Math.min(...lats) - 3), Math.min(75, Math.max(...lats) + 3)]).rotate([-interp(0.5)[0], 0])
+    .fitExtent([[6, 8], [W - 6, H - 8]], { type: "MultiPoint", coordinates: pts.flatMap(([x, y]) => [[x, y + 8], [x, y - 8]]) });
+  const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
+  const ctx = bg.getContext("2d"), path = d3.geoPath(mm.proj, ctx);
+  ctx.fillStyle = "#6F8FB8"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#A7B477"; ctx.beginPath(); path(topojson.feature(window.__atlas, window.__atlas.objects.land)); ctx.fill();
+  // Russia: hatched in red, like the chart.
+  const pc = document.createElement("canvas"); pc.width = pc.height = 4;
+  const pp = pc.getContext("2d"); pp.fillStyle = "#C9A07A"; pp.fillRect(0, 0, 4, 4); pp.fillStyle = "#C0392B"; for (let i = 0; i < 4; i++) pp.fillRect(i, 3 - i, 1, 1);
+  ctx.fillStyle = ctx.createPattern(pc, "repeat"); ctx.beginPath(); path(russia); ctx.fill();
+  ctx.strokeStyle = "#8A1F14"; ctx.lineWidth = 1; ctx.beginPath(); path(russia); ctx.stroke();
+  ctx.strokeStyle = "rgba(59,42,20,0.35)"; ctx.lineWidth = 0.6; ctx.beginPath(); path(topojson.mesh(window.__atlas, window.__atlas.objects.countries, (a, b) => a !== b)); ctx.stroke();
+  mm.bg = bg;
+}
+function drawMinimap() {
+  const st = now(); if (!mm.bg || !st) return;
+  const c = $("mm"), ctx = c.getContext("2d"), path = d3.geoPath(mm.proj, ctx);
+  ctx.drawImage(mm.bg, 0, 0);
+  // Ahead: dashed great circle to the destination.
+  ctx.setLineDash([2, 2]); ctx.strokeStyle = "#5B1E4A"; ctx.lineWidth = 1;
+  ctx.beginPath(); path({ type: "LineString", coordinates: [[st.lon, st.lat], DEST] }); ctx.stroke(); ctx.setLineDash([]);
+  // Before tracking started: origin to the first fix.
+  if (track.length) { ctx.strokeStyle = "rgba(176,32,122,0.6)"; ctx.beginPath(); path({ type: "LineString", coordinates: [ORIG, [track[0].lon, track[0].lat]] }); ctx.stroke(); }
+  // Flown, split by link state.
+  ctx.lineWidth = 2;
+  let run = [], state = null;
+  const flush = () => { if (run.length > 1) { ctx.strokeStyle = state === false ? "#E0281C" : "#B0207A"; ctx.beginPath(); path({ type: "LineString", coordinates: run }); ctx.stroke(); } };
+  for (let i = 0; i < track.length; i += 4) {
+    const p = track[i], on = p.online === false ? false : true;
+    if (state !== null && on !== state) { flush(); run = [run.at(-1)]; }
+    state = on; run.push([p.lon, p.lat]);
+  }
+  run.push([st.lon, st.lat]); flush();
+  // Airports.
+  for (const ap of [ORIG, DEST]) { const [x, y] = mm.proj(ap); ctx.fillStyle = "#3B2A14"; ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4); ctx.fillStyle = "#F4E7C6"; ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2); }
+  // The aircraft: a blinking white pointer, Minecraft map style, aimed along the heading.
+  const [x, y] = mm.proj([st.lon, st.lat]), [x2, y2] = mm.proj(destination([st.lon, st.lat], st.hdg, 300));
+  const a = Math.atan2(y2 - y, x2 - x);
+  ctx.save(); ctx.translate(Math.round(x), Math.round(y)); ctx.rotate(a);
+  ctx.fillStyle = Math.floor(performance.now() / 500) % 2 ? "#FFFFFF" : "#FFE14D";
+  ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -3.5); ctx.lineTo(-2, 0); ctx.lineTo(-4, 3.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  const done = clamp(1 - d3.geoDistance([st.lon, st.lat], DEST) / d3.geoDistance(ORIG, DEST), 0, 1);
+  const togo = d3.geoDistance([st.lon, st.lat], DEST) * R_KM;
+  $("mm-a").textContent = `${Math.round(done * 100)}% flown`;
+  $("mm-b").textContent = `${fmt(togo)} km to ${ROUTE.dest.code}`;
+}
+
+// ============================================================
+// Arrival time. The aircraft's "estimated_arrival_time_utc" is really London local
+// time (it runs exactly one BST hour ahead of the minutes-to-go figure, and of the
+// distance left at the current ground speed). The seatback screen uses
+// time_to_destination_minutes, so we do too.
+// ============================================================
+const fmtZ = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" });
+// Destination local time without a time-zone table: the aircraft reports the current
+// local time there alongside UTC, so the offset is their difference.
+function destOffsetMin() {
+  const f = server?.flight, a = /^(\d\d):(\d\d)$/.exec(f?.time_at_destination || ""), u = /^(\d\d):(\d\d)$/.exec(f?.current_utc_time || "");
+  if (!a || !u) return 0;
+  let d = (+a[1] * 60 + +a[2]) - (+u[1] * 60 + +u[2]);
+  if (d > 840) d -= 1440; if (d < -720) d += 1440;
+  return Math.round(d / 15) * 15;
+}
+const fmtLocal = (ms) => fmtZ.format(ms + destOffsetMin() * 60e3);
+function arrivalMs() {
+  const f = server?.flight;
+  if (f?.time_to_destination_minutes == null) return null;
+  const at = server.flight_at ? server.flight_at * 1000 : Date.now();
+  return at + f.time_to_destination_minutes * 60e3;
+}
+
+// ============================================================
+// Time remaining, as an XP bar pinned to the bottom of every view.
+// ============================================================
+function updateXP() {
+  const st = now(); if (!st) return;
+  const etaMs = arrivalMs();
+  let mins = etaMs ? (etaMs - Date.now()) / 60e3 : null;
+  const done = clamp(1 - d3.geoDistance([st.lon, st.lat], DEST) / d3.geoDistance(ORIG, DEST), 0, 1);
+  $("xp-fill").style.width = `${(done * 100).toFixed(2)}%`;
+  if (mins == null) return;
+  mins = Math.max(0, Math.round(mins));
+  $("xp-lvl").textContent = `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, "0")}`;
+  $("xp-text").textContent = `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} min to ${ROUTE.dest.city}, lands ${fmtZ.format(etaMs)}Z (${fmtLocal(etaMs)} local), ${Math.round(done * 100)}% flown`;
+}
+
+// ============================================================
+// Boot
+// ============================================================
+async function boot() {
+  // Dirt loading background.
+  const dirt = document.createElement("canvas"); dirt.width = dirt.height = 16;
+  const dctx = dirt.getContext("2d");
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = hash2(x * 17, y * 31); dctx.fillStyle = `rgb(${70 + v * 40},${50 + v * 28},${32 + v * 18})`; dctx.fillRect(x, y, 1, 1); }
+  $("loading").style.backgroundImage = `url(${dirt.toDataURL()})`;
+  const bar = (f) => ($("load-bar").style.width = `${Math.round(f * 100)}%`);
+
+  $("load-sub").textContent = "Loading the world map";
+  const [atlas] = await Promise.all([
+    fetch("../vendor/countries-50m.json").then((r) => r.json()),
+    loadGlobal("marble", "tex/earth-blue-marble.jpg"), loadGlobal("topo", "tex/earth-topology.png"), loadGlobal("water", "tex/earth-water.png"),
+  ]);
+  countries = topojson.feature(atlas, atlas.objects.countries);
+  window.__atlas = atlas;
+  russia = countries.features.find((f) => f.id === "643");
+  $("load-sub").textContent = "Waiting for the aircraft's flight data";
+  for (;;) {
+    try { const r = await fetch("/api/route").then((x) => x.json()); if (r.origin && r.dest) { ROUTE = r; break; } } catch {}
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+  ORIG = [ROUTE.origin.lon, ROUTE.origin.lat]; DEST = [ROUTE.dest.lon, ROUTE.dest.lat];
+  document.title = `${ROUTE.flight} Voxel`;
+  $("xp-a").textContent = ROUTE.origin.code; $("xp-b").textContent = ROUTE.dest.code;
+  bar(0.15);
+  buildGlobe(russia);
+  resize();
+
+  $("load-sub").textContent = "Waiting for the aircraft's position";
+  while (!fix) { await poll(); if (!fix) await new Promise((r) => setTimeout(r, 1500)); }
+  // Full history for the globe track.
+  track = await fetch("/api/track?since=0").then((r) => r.json()); lastT = track.at(-1)?.t || 0;
+
+  $("load-sub").textContent = `Placing blocks under ${ROUTE.tail || "the aircraft"}`;
+  try {
+    const m = await fetch("tex/manifest.json").then((r) => r.json());
+    manifest = { dem: new Set(m.dem), sat: new Set(m.sat) };
+  } catch { manifest = null; }
+  await buildChunk(fix.lat, fix.lon, blockKmFor(2, fix.alt), (f) => bar(0.15 + f * 0.8));
+  bar(1);
+
+  const st = now();
+  placePlane(st);
+  // Start behind and above the aircraft, looking forward along the track.
+  const back = new THREE.Vector3(-Math.cos((90 - st.hdg) * D2R), 0, Math.sin((90 - st.hdg) * D2R));
+  const rightV = new THREE.Vector3(-back.z, 0, back.x);
+  chaseCam.position.copy(plane.position).add(back.multiplyScalar(6.5)).add(rightV.multiplyScalar(5.5)).add(new THREE.Vector3(0, 1.6, 0));
+  chaseCtl.target.copy(plane.position); chaseCtl.update();
+  globeCam.position.copy(vec(st.lat - 6, st.lon + 4, 260));
+  rebuildRoute();
+
+  $("loading").hidden = true;
+  setInterval(poll, 3000);
+  pollRaw(); setInterval(pollRaw, 10000);
+  updateXP(); setInterval(updateXP, 1000);
+  buildMinimap(); drawMinimap(); setInterval(drawMinimap, 500);
+  frame();
+}
+boot().catch((e) => { $("load-title").textContent = "Couldn't build the world"; $("load-sub").textContent = String(e); console.error(e); });
+</script>
+</body>
+</html>

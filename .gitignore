@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.log
+
+# Personal flight logs written by the tracker
+tracker/data/
+
+# Map tiles fetched per route by tools/prefetch_tiles.py (Esri terms: don't redistribute)
+tracker/static/3d/tex/sat/
+tracker/static/3d/tex/dem/
+tracker/static/3d/tex/manifest.json
+
+# Photos we can't redistribute, and large intermediates
+tracker/static/photos/ps-*.jpg
+tracker/static/photos/*-cutout-full.png
+
+# Build output
+share/pixelproxy/pixelproxy
+share/socktest/socktest
+
+# Show reel renders (they show a real flight; share them deliberately)
+showreel/*.mp4
+showreel/frames/
